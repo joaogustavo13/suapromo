@@ -6,12 +6,14 @@
 .voice-player-bubble {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: rgba(255, 71, 87, 0.08);
   border: 1px solid rgba(255, 71, 87, 0.2);
   border-radius: 14px;
-  padding: 8px 12px;
-  margin: 6px 0;
+  padding: 6px 10px;
+  margin: 4px 0;
+  width: 100%;
+  min-width: 190px;
   max-width: 100%;
   box-sizing: border-box;
 }
@@ -95,8 +97,10 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.75rem;
-  opacity: 0.8;
+  gap: 8px;
+  font-size: 0.72rem;
+  opacity: 0.82;
+  white-space: nowrap;
 }
 
 .btn-voice-speed {
@@ -270,29 +274,101 @@
   color: #fff;
 }
 
-/* --- BARRA DE RESPOSTA CONTÍNUA DO CLIENTE (CHAT CONTÍNUO) --- */
-.ticket-reply-container {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed rgba(0, 0, 0, 0.1);
+/* --- CHAT UNIFICADO E COMPOSER FIXO NO RODAPÉ (WHATSAPP-STYLE MOBILE) --- */
+.unified-chat-thread {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
+  width: 100%;
+  padding-bottom: 6px;
 }
 
-.ticket-reply-row {
+.bubble-prod-ref {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.15s ease;
+}
+
+.bubble-prod-ref:hover {
+  background: rgba(15, 23, 42, 0.09);
+}
+
+.bubble-prod-ref.admin-prod-ref {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.bubble-prod-ref img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.bubble-prod-ref-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.bubble-prod-ref-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bubble-prod-ref-link {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #ff4757;
+}
+
+.drawer-composer {
+  flex-shrink: 0;
+  background: #ffffff;
+  border-top: 1px solid #e2e8f0;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.drawer-audio-zone {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.drawer-composer-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
 }
 
 .ticket-reply-input {
   flex: 1;
-  padding: 8px 12px;
+  min-width: 0;
+  padding: 9px 14px;
   border: 1.5px solid #e2e8f0;
-  border-radius: 20px;
-  font-size: 0.85rem;
+  border-radius: 22px;
+  font-size: 16px; /* Previne zoom automático no iPhone Safari */
   outline: none;
   background: #f8fafc;
   transition: all 0.2s ease;
@@ -305,8 +381,8 @@
 }
 
 .btn-ticket-mic {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: none;
   background: rgba(255, 71, 87, 0.12);
@@ -316,7 +392,7 @@
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  font-size: 1rem;
+  font-size: 1.1rem;
   transition: all 0.2s ease;
 }
 
@@ -326,12 +402,12 @@
 }
 
 .btn-ticket-send {
-  padding: 7px 14px;
+  padding: 10px 16px;
   background: linear-gradient(135deg, #ff4757 0%, #ff6b81 100%);
   color: #fff;
   border: none;
-  border-radius: 20px;
-  font-size: 0.82rem;
+  border-radius: 22px;
+  font-size: 0.88rem;
   font-weight: 700;
   cursor: pointer;
   flex-shrink: 0;
@@ -345,8 +421,4 @@
 .btn-ticket-send:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.ticket-audio-zone {
-  width: 100%;
 }

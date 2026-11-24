@@ -14,8 +14,8 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2">
   <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png?v=2">
   <link rel="shortcut icon" href="/favicon.ico?v=2">
-  <link rel="stylesheet" href="/css/style.css">
-  <link rel="stylesheet" href="/css/audio.css?v=1">
+  <link rel="stylesheet" href="/css/style.css?v=3">
+  <link rel="stylesheet" href="/css/audio.css?v=3">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -266,22 +266,32 @@
   </div>
 
   <!-- ======================================================== -->
-  <!-- GAVETA LATERAL: MINHAS MENSAGENS -->
+  <!-- GAVETA LATERAL: MINHAS MENSAGENS (WHATSAPP-STYLE MOBILE) -->
   <!-- ======================================================== -->
   <div id="messages-drawer" class="messages-drawer">
     <div class="drawer-header">
       <div class="drawer-header-left">
-        <div class="drawer-icon">📬</div>
+        <div class="drawer-icon">💬</div>
         <div>
-          <h4>Minhas Mensagens</h4>
-          <span id="drawer-user-info" class="drawer-user-sub">Suas dúvidas e respostas</span>
+          <h4>Sua Promo • Chat</h4>
+          <span id="drawer-user-info" class="drawer-user-sub">Conversa unificada</span>
         </div>
       </div>
       <button class="drawer-close-btn" onclick="closeMessagesCenter()">&times;</button>
     </div>
 
     <div class="drawer-content" id="drawer-tickets-list">
-      <!-- Injetado via client-messages.js -->
+      <!-- Mensagens injetadas via client-messages.js -->
+    </div>
+
+    <!-- Barra de Resposta Fixa no Rodapé (Nunca some e nunca corta ao gravar áudio!) -->
+    <div id="drawer-composer" class="drawer-composer" style="display: none;">
+      <div id="drawer-audio-zone" class="drawer-audio-zone"></div>
+      <form class="drawer-composer-form" onsubmit="submitUnifiedCustomerReply(event)">
+        <button type="button" class="btn-ticket-mic" id="btn-drawer-mic" onclick="toggleDrawerMic()" title="Gravar áudio">🎙️</button>
+        <input type="text" class="ticket-reply-input" id="drawer-reply-input" placeholder="Mensagem..." autocomplete="off">
+        <button type="submit" class="btn-ticket-send" id="btn-drawer-send">Enviar</button>
+      </form>
     </div>
   </div>
 
@@ -294,8 +304,8 @@
     <span class="floating-badge" id="floating-unread-badge" style="display: none;">0</span>
   </div>
 
-  <script src="/js/app.js"></script>
-  <script src="/js/audio-helper.js?v=1"></script>
-  <script src="/js/client-messages.js"></script>
+  <script src="/js/app.js?v=3"></script>
+  <script src="/js/audio-helper.js?v=3"></script>
+  <script src="/js/client-messages.js?v=3"></script>
 </body>
 </html>

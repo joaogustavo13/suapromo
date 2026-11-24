@@ -515,10 +515,11 @@ app.post('/api/user/messages', async (req, res) => {
     repliedAt: null
   };
 
-  await db.addMessage(newMsg);
+  const savedMsg = (await db.addMessage(newMsg)) || newMsg;
 
-  // Avisa painel do admin via Socket
-  io.to('admin-room').emit('admin:new_question', newMsg);
+  // Avisa painel do admin via Socket (emite conversa unificada)
+  io.to('admin-room').emit('admin:new_question', savedMsg);
+  io.to('admin-room').emit('admin:message_updated', savedMsg);
 
   // 1. Robô avisa o Dono no Telegram na hora (garante envio antes de responder)
   try {
@@ -535,7 +536,7 @@ app.post('/api/user/messages', async (req, res) => {
     url: '/admin.html'
   });
 
-  res.status(201).json({ success: true, message: newMsg });
+  res.status(201).json({ success: true, message: savedMsg });
 });
 
 // Cliente envia réplica/continuação na conversa existente (chat contínuo)

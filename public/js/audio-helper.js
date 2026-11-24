@@ -45,7 +45,7 @@ function renderAudioPlayer(audioDataUrl, playerId, label = 'Mensagem de voz') {
         </div>
         <div class="voice-player-meta">
           <span class="voice-player-time">0:00</span>
-          <span class="voice-player-label">🎤 ${escapeAudioHtml(label)}</span>
+          <span class="voice-player-label">🎤 Áudio</span>
         </div>
       </div>
 

@@ -342,43 +342,49 @@ async function loadUserMessages() {
   }
 }
 
-// --- GRAVADOR E RESPOSTA CONTÍNUA DO CLIENTE (CHAT MULTI-MENSAGENS) ---
-let ticketVoiceRecorder = null;
-let ticketRecordedAudio = {};
-let activeRecordingTicketId = null;
+// --- GRAVADOR E CHAT UNIFICADO DO CLIENTE (ESTILO WHATSAPP MOBILE) ---
+let drawerVoiceRecorder = null;
+let drawerRecordedAudio = null;
 
-function toggleCustomerTicketMic(ticketId) {
-  if (activeRecordingTicketId === ticketId && ticketVoiceRecorder && ticketVoiceRecorder.mediaRecorder && ticketVoiceRecorder.mediaRecorder.state === 'recording') {
-    ticketVoiceRecorder.stop();
+function scrollDrawerToBottom() {
+  const container = document.getElementById('drawer-tickets-list');
+  if (container) {
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  }
+}
+
+function toggleDrawerMic() {
+  if (drawerVoiceRecorder && drawerVoiceRecorder.mediaRecorder && drawerVoiceRecorder.mediaRecorder.state === 'recording') {
+    drawerVoiceRecorder.stop();
     return;
   }
 
-  if (ticketVoiceRecorder) {
-    ticketVoiceRecorder.cancel();
+  if (drawerVoiceRecorder) {
+    drawerVoiceRecorder.cancel();
   }
 
-  activeRecordingTicketId = ticketId;
-  ticketVoiceRecorder = new AudioVoiceRecorder({
+  drawerVoiceRecorder = new AudioVoiceRecorder({
     onStateChange: (state, seconds) => {
-      renderTicketRecorderUI(ticketId, state, seconds);
+      renderDrawerRecorderUI(state, seconds);
     },
     onReady: (base64Audio, seconds) => {
-      ticketRecordedAudio[ticketId] = base64Audio;
-      renderTicketRecorderUI(ticketId, 'ready', seconds);
+      drawerRecordedAudio = base64Audio;
+      renderDrawerRecorderUI('ready', seconds);
     },
     onCancel: () => {
-      delete ticketRecordedAudio[ticketId];
-      activeRecordingTicketId = null;
-      renderTicketRecorderUI(ticketId, 'idle', 0);
+      drawerRecordedAudio = null;
+      renderDrawerRecorderUI('idle', 0);
     }
   });
 
-  ticketVoiceRecorder.start();
+  drawerVoiceRecorder.start();
 }
 
-function renderTicketRecorderUI(ticketId, state, seconds = 0) {
-  const container = document.getElementById(`ticket-audio-zone-${ticketId}`);
-  const micBtn = document.getElementById(`btn-ticket-mic-${ticketId}`);
+function renderDrawerRecorderUI(state, seconds = 0) {
+  const container = document.getElementById('drawer-audio-zone');
+  const micBtn = document.getElementById('btn-drawer-mic');
   if (!container) return;
 
   if (state === 'idle') {
@@ -395,82 +401,110 @@ function renderTicketRecorderUI(ticketId, state, seconds = 0) {
       micBtn.style.color = '#fff';
     }
     container.innerHTML = `
-      <div class="recording-active-bar" style="margin: 4px 0; background: rgba(239, 68, 68, 0.15);">
-        <div class="recording-indicator"></div>
-        <span class="recording-timer">${formatAudioSeconds(seconds)}</span>
-        <button type="button" class="btn-record-stop" onclick="stopTicketAudioRecording('${ticketId}')">⏹️ Concluir</button>
-        <button type="button" class="btn-record-cancel" onclick="cancelTicketAudioRecording('${ticketId}')">✕ Cancelar</button>
+      <div class="recording-active-bar" style="width: 100%; justify-content: space-between; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div class="recording-indicator"></div>
+          <span class="recording-timer">${formatAudioSeconds(seconds)}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <button type="button" class="btn-record-stop" onclick="stopDrawerAudioRecording()">⏹️ Parar</button>
+          <button type="button" class="btn-record-cancel" onclick="cancelDrawerAudioRecording()">✕</button>
+        </div>
       </div>
     `;
-  } else if (state === 'ready' && ticketRecordedAudio[ticketId]) {
+    scrollDrawerToBottom();
+  } else if (state === 'ready' && drawerRecordedAudio) {
     if (micBtn) {
       micBtn.textContent = '🎙️';
       micBtn.style.background = 'rgba(255, 71, 87, 0.12)';
       micBtn.style.color = '#ff4757';
     }
     container.innerHTML = `
-      <div class="audio-preview-box" style="margin: 4px 0;">
-        <span style="font-size: 0.78rem; font-weight: 700; color: #059669; white-space: nowrap;">✅ Áudio pronto!</span>
+      <div class="audio-preview-box" style="width: 100%; box-sizing: border-box;">
         <div style="flex: 1; min-width: 0;">
-          ${renderAudioPlayer(ticketRecordedAudio[ticketId], 'preview_' + ticketId, 'Prévia do áudio')}
+          ${renderAudioPlayer(drawerRecordedAudio, 'drawer_preview_player', 'Áudio')}
         </div>
-        <button type="button" class="btn-discard-audio" onclick="discardTicketAudioRecording('${ticketId}')" title="Descartar">
+        <button type="button" class="btn-discard-audio" onclick="discardDrawerAudioRecording()" title="Descartar áudio" style="flex-shrink: 0; font-size: 1.05rem;">
           🗑️
         </button>
       </div>
     `;
+    scrollDrawerToBottom();
   }
 }
 
-function stopTicketAudioRecording(ticketId) {
-  if (ticketVoiceRecorder) ticketVoiceRecorder.stop();
+function stopDrawerAudioRecording() {
+  if (drawerVoiceRecorder) drawerVoiceRecorder.stop();
 }
 
-function cancelTicketAudioRecording(ticketId) {
-  if (ticketVoiceRecorder) ticketVoiceRecorder.cancel();
+function cancelDrawerAudioRecording() {
+  if (drawerVoiceRecorder) drawerVoiceRecorder.cancel();
 }
 
-function discardTicketAudioRecording(ticketId) {
-  delete ticketRecordedAudio[ticketId];
-  if (ticketVoiceRecorder) ticketVoiceRecorder.cancel();
-  renderTicketRecorderUI(ticketId, 'idle', 0);
+function discardDrawerAudioRecording() {
+  drawerRecordedAudio = null;
+  if (drawerVoiceRecorder) drawerVoiceRecorder.cancel();
+  renderDrawerRecorderUI('idle', 0);
 }
 
-async function submitCustomerTicketReply(e, ticketId) {
+async function submitUnifiedCustomerReply(e) {
   if (e) e.preventDefault();
-  const input = document.getElementById(`ticket-reply-input-${ticketId}`);
-  const text = input ? input.value.trim() : '';
-  const audio = ticketRecordedAudio[ticketId] || null;
-
-  if (!text && !audio) {
-    showToast('Digite uma mensagem ou grave um áudio para responder.');
+  if (!currentUser) {
+    openAuthModal();
     return;
   }
 
-  const btn = document.getElementById(`btn-ticket-send-${ticketId}`);
+  const input = document.getElementById('drawer-reply-input');
+  const text = input ? input.value.trim() : '';
+  const audio = drawerRecordedAudio || null;
+
+  if (!text && !audio) {
+    showToast('Digite uma mensagem ou grave um áudio.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-drawer-send');
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Enviando...';
+    btn.textContent = '...';
   }
 
   try {
-    const res = await fetch(`/api/user/reply/${ticketId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: currentUser.id,
-        reply: text,
-        replyAudio: audio
-      })
-    });
+    const primaryChat = (userMessages && userMessages.length > 0) ? userMessages[0] : null;
+    let res;
+
+    if (primaryChat) {
+      res = await fetch(`/api/user/reply/${primaryChat.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          reply: text,
+          replyAudio: audio
+        })
+      });
+    } else {
+      // Caso nunca tenha enviado dúvida antes, cria o chat unificado direto!
+      res = await fetch('/api/user/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          username: currentUser.username,
+          question: text || '🎤 [Dúvida em Áudio]',
+          questionAudio: audio
+        })
+      });
+    }
 
     if (res.ok) {
       if (input) input.value = '';
-      discardTicketAudioRecording(ticketId);
-      showToast('✅ Mensagem enviada ao vendedor!');
+      discardDrawerAudioRecording();
+      showToast('✅ Mensagem enviada!');
       await loadUserMessages();
+      scrollDrawerToBottom();
     } else {
-      showToast('Erro ao enviar resposta.');
+      showToast('Erro ao enviar mensagem.');
     }
   } catch (err) {
     showToast('Erro de conexão ao enviar.');
@@ -482,13 +516,18 @@ async function submitCustomerTicketReply(e, ticketId) {
   }
 }
 
-// Renderiza a lista de mensagens na gaveta (Chat Contínuo sem fim)
+// Renderiza TODAS as mensagens do cliente em 1 único chat contínuo estilo WhatsApp
 function renderUserMessagesList() {
   const container = document.getElementById('drawer-tickets-list');
   const userInfo = document.getElementById('drawer-user-info');
+  const composer = document.getElementById('drawer-composer');
 
   if (userInfo && currentUser) {
     userInfo.textContent = `Conta: ${currentUser.username}`;
+  }
+
+  if (composer) {
+    composer.style.display = currentUser ? 'flex' : 'none';
   }
 
   const pushBanner = getPushStatusBanner();
@@ -497,77 +536,86 @@ function renderUserMessagesList() {
     container.innerHTML = `
       ${pushBanner}
       <div class="empty-drawer">
-        <p>Você ainda não enviou nenhuma dúvida.</p>
-        <small>Clique em "Tirar Dúvida" em qualquer oferta para perguntar ao vendedor!</small>
+        <p>Sua conversa com a equipe <strong>Sua Promo</strong> está aberta!</p>
+        <small>Escreva ou grave um áudio abaixo, ou clique em "Tirar Dúvida" em qualquer oferta.</small>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = pushBanner + userMessages.map(m => {
-    const isAnswered = m.status === 'answered';
-    const statusBadge = isAnswered
-      ? `<span class="ticket-status-replied">🟢 Respondido</span>`
-      : `<span class="ticket-status-pending">🟡 Em análise</span>`;
-
-    // Histórico completo de mensagens da conversa
+  // Agrupa todo o histórico de todos os itens (retrocompatibilidade total) em uma única timeline
+  let unifiedHistory = [];
+  userMessages.forEach(m => {
     const hist = Array.isArray(m.history) && m.history.length > 0 ? m.history : [
-      { sender: 'client', text: m.question, audio: m.questionAudio, createdAt: m.createdAt },
-      ...(m.reply || m.replyAudio ? [{ sender: 'admin', text: m.reply, audio: m.replyAudio, createdAt: m.repliedAt }] : [])
+      {
+        id: 'msg_q_' + m.id,
+        sender: 'client',
+        text: m.question,
+        audio: m.questionAudio,
+        productId: m.productId,
+        productTitle: m.productTitle,
+        productImage: m.productImage,
+        productLink: m.productLink,
+        createdAt: m.createdAt
+      },
+      ...(m.reply || m.replyAudio ? [{
+        id: 'msg_r_' + m.id,
+        sender: 'admin',
+        text: m.reply,
+        audio: m.replyAudio,
+        createdAt: m.repliedAt
+      }] : [])
     ];
+    unifiedHistory.push(...hist);
+  });
 
-    const threadBubblesHtml = hist.map(entry => {
-      const time = entry.createdAt ? new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-      if (entry.sender === 'client') {
-        return `
-          <div class="ticket-bubble bubble-client">
-            <div class="bubble-sender">Você (${escapeHtml(currentUser.username)})</div>
-            ${entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]' ? `<div class="bubble-text">${escapeHtml(entry.text)}</div>` : ''}
-            ${entry.audio ? renderAudioPlayer(entry.audio, 'c_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Sua dúvida em áudio') : ''}
-            <span class="bubble-time">${time}</span>
-          </div>
-        `;
-      } else {
-        return `
-          <div class="ticket-bubble bubble-admin">
-            <div class="bubble-sender">Equipe Sua Promo</div>
-            ${entry.text && entry.text !== '🎤 [Resposta em Áudio]' ? `<div class="bubble-text">${escapeHtml(entry.text)}</div>` : ''}
-            ${entry.audio ? renderAudioPlayer(entry.audio, 'a_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Resposta em áudio do vendedor') : ''}
-            <span class="bubble-time">${time}</span>
-          </div>
-        `;
-      }
-    }).join('');
+  unifiedHistory.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
 
-    return `
-      <div class="client-ticket-card">
-        <div class="ticket-card-header">
-          <div class="ticket-prod-info">
-            ${m.productImage ? `<img src="${m.productImage}" class="ticket-prod-thumb" alt="Produto">` : ''}
-            <div>
-              <h5 class="ticket-prod-title">${escapeHtml(m.productTitle || 'Oferta Mercado Livre')}</h5>
-              ${statusBadge}
-            </div>
-          </div>
-          ${m.productLink ? `<a href="${m.productLink}" target="_blank" class="ticket-view-link">Ver Oferta ↗</a>` : ''}
+  const threadHtml = unifiedHistory.map(entry => {
+    const time = entry.createdAt ? new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+
+    const productTagHtml = entry.productTitle ? `
+      <a href="${entry.productLink || '#'}" target="_blank" class="bubble-prod-ref">
+        ${entry.productImage ? `<img src="${entry.productImage}" alt="">` : ''}
+        <div class="bubble-prod-ref-info">
+          <span class="bubble-prod-ref-title">${escapeHtml(entry.productTitle)}</span>
+          <span class="bubble-prod-ref-link">Ver oferta ↗</span>
         </div>
+      </a>
+    ` : '';
 
-        <div class="ticket-messages-thread">
-          ${threadBubblesHtml}
+    if (entry.sender === 'client') {
+      const hasText = entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]';
+      return `
+        <div class="ticket-bubble bubble-client">
+          ${productTagHtml}
+          <div class="bubble-sender">Você</div>
+          ${hasText ? `<div class="bubble-text">${escapeHtml(entry.text)}</div>` : ''}
+          ${entry.audio ? renderAudioPlayer(entry.audio, 'c_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
+          <span class="bubble-time">${time}</span>
         </div>
-
-        <!-- Barra de Réplica / Chat Contínuo para o cliente responder quantas vezes quiser -->
-        <div class="ticket-reply-container">
-          <div id="ticket-audio-zone-${m.id}" class="ticket-audio-zone"></div>
-          <form class="ticket-reply-row" onsubmit="submitCustomerTicketReply(event, '${m.id}')">
-            <button type="button" class="btn-ticket-mic" id="btn-ticket-mic-${m.id}" onclick="toggleCustomerTicketMic('${m.id}')" title="Gravar resposta em áudio">🎙️</button>
-            <input type="text" class="ticket-reply-input" id="ticket-reply-input-${m.id}" placeholder="Escreva uma resposta ou grave um áudio..." autocomplete="off">
-            <button type="submit" class="btn-ticket-send" id="btn-ticket-send-${m.id}">Enviar</button>
-          </form>
+      `;
+    } else {
+      const hasText = entry.text && entry.text !== '🎤 [Resposta em Áudio]';
+      return `
+        <div class="ticket-bubble bubble-admin">
+          <div class="bubble-sender">Equipe Sua Promo</div>
+          ${hasText ? `<div class="bubble-text">${escapeHtml(entry.text)}</div>` : ''}
+          ${entry.audio ? renderAudioPlayer(entry.audio, 'a_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
+          <span class="bubble-time">${time}</span>
         </div>
-      </div>
-    `;
+      `;
+    }
   }).join('');
+
+  container.innerHTML = `
+    ${pushBanner}
+    <div class="unified-chat-thread">
+      ${threadHtml}
+    </div>
+  `;
+
+  scrollDrawerToBottom();
 }
 
 function updateUnreadBadge() {
@@ -734,8 +782,8 @@ function getPushStatusBanner() {
 
   if (Notification.permission === 'granted') {
     return `
-      <div class="push-permission-card active">
-        <span>🔔 <strong>Notificações no celular ativas:</strong> Você será notificado mesmo se fechar este site!</span>
+      <div class="push-permission-card active" style="padding: 6px 10px; font-size: 0.75rem; margin-bottom: 4px;">
+        <span>🔔 Notificações ativas no celular</span>
       </div>
     `;
   } else if (Notification.permission === 'default') {

@@ -455,11 +455,21 @@ function renderActiveThread(msg) {
     const time = entry.createdAt ? new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const div = document.createElement('div');
     if (entry.sender === 'client') {
+      const prodTag = entry.productTitle ? `
+        <a href="${entry.productLink || '#'}" target="_blank" class="bubble-prod-ref admin-prod-ref">
+          ${entry.productImage ? `<img src="${entry.productImage}" alt="">` : ''}
+          <div class="bubble-prod-ref-info">
+            <span class="bubble-prod-ref-title">${escapeHtml(entry.productTitle)}</span>
+            <span class="bubble-prod-ref-link">Ver oferta ↗</span>
+          </div>
+        </a>
+      ` : '';
       div.className = 'desk-bubble desk-bubble-visitor';
       div.innerHTML = `
         <div class="desk-bubble-sender">Cliente (${escapeHtml(msg.username)})</div>
+        ${prodTag}
         ${entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]' ? `<div>${escapeHtml(entry.text)}</div>` : ''}
-        ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio do cliente') : ''}
+        ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
         <span class="desk-bubble-time">${time}</span>
       `;
     } else {
@@ -467,7 +477,7 @@ function renderActiveThread(msg) {
       div.innerHTML = `
         <div class="desk-bubble-sender">Você (Atendimento)</div>
         ${entry.text && entry.text !== '🎤 [Resposta em Áudio]' ? `<div>${escapeHtml(entry.text)}</div>` : ''}
-        ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Seu áudio de resposta') : ''}
+        ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
         <span class="desk-bubble-time">${time}</span>
       `;
     }

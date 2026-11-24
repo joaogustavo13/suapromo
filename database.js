@@ -147,12 +147,146 @@ async function initDatabase() {
       console.log(`[Database] Migradas ${initialMessages.length} mensagens iniciais para o PostgreSQL.`);
     }
 
+    // Consolida conversas duplicadas por user_id (1 chat único por cliente)
+    await consolidateDuplicateChatsPostgres();
+
     return true;
   } catch (err) {
     console.error('❌ Erro ao conectar ao PostgreSQL, mantendo fallback JSON:', err.message);
     usePostgres = false;
+    consolidateDuplicateChatsJson();
     return false;
   }
+}
+
+async function consolidateDuplicateChatsPostgres() {
+  try {
+    const res = await pool.query('SELECT * FROM app_messages ORDER BY created_at ASC');
+    if (res.rows.length <= 1) return;
+
+    const byUser = new Map();
+    for (const row of res.rows) {
+      const uid = row.user_id || row.id;
+      if (!byUser.has(uid)) byUser.set(uid, []);
+      byUser.get(uid).push(formatMessageRow(row));
+    }
+
+    for (const [uid, rows] of byUser.entries()) {
+      if (rows.length <= 1) continue;
+
+      const primary = rows[0];
+      let mergedHistory = [];
+      let latest = rows[rows.length - 1];
+
+      for (const r of rows) {
+        const items = (r.history || []).map((entry, idx) => {
+          if (idx === 0 && entry.sender === 'client' && !entry.productTitle && r.productTitle) {
+            return {
+              ...entry,
+              productId: r.productId,
+              productTitle: r.productTitle,
+              productImage: r.productImage,
+              productLink: r.productLink
+            };
+          }
+          return entry;
+        });
+        mergedHistory.push(...items);
+      }
+
+      mergedHistory.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+
+      const hasPending = rows.some(r => r.status === 'pending') || latest.status === 'pending';
+      const finalStatus = hasPending && mergedHistory[mergedHistory.length - 1]?.sender === 'client' ? 'pending' : latest.status;
+
+      await pool.query(
+        `UPDATE app_messages
+         SET phone = COALESCE($1, phone),
+             product_id = COALESCE($2, product_id),
+             product_title = COALESCE($3, product_title),
+             product_image = COALESCE($4, product_image),
+             product_link = COALESCE($5, product_link),
+             question = $6,
+             question_audio = $7,
+             reply = $8,
+             reply_audio = $9,
+             status = $10,
+             history = $11,
+             created_at = $12,
+             replied_at = $13
+         WHERE id = $14`,
+        [
+          latest.phone || primary.phone,
+          latest.productId || primary.productId,
+          latest.productTitle || primary.productTitle,
+          latest.productImage || primary.productImage,
+          latest.productLink || primary.productLink,
+          latest.question,
+          latest.questionAudio,
+          latest.reply,
+          latest.replyAudio,
+          finalStatus,
+          JSON.stringify(mergedHistory),
+          latest.createdAt,
+          latest.repliedAt,
+          primary.id
+        ]
+      );
+
+      const idsToDelete = rows.slice(1).map(r => r.id);
+      await pool.query('DELETE FROM app_messages WHERE id = ANY($1::text[])', [idsToDelete]);
+      console.log(`🔄 [Database] Consolidadas ${rows.length} conversas do cliente ${uid} em 1 chat único.`);
+    }
+  } catch (err) {
+    console.warn('⚠️ Erro ao consolidar conversas por usuário:', err.message);
+  }
+}
+
+function consolidateDuplicateChatsJson() {
+  const list = readJson(MESSAGES_FILE, []);
+  if (list.length <= 1) return;
+  const byUser = new Map();
+  // Mais antigas primeiro para manter ordem cronológica
+  const sorted = [...list].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+  for (const m of sorted) {
+    const uid = m.userId || m.id;
+    if (!byUser.has(uid)) byUser.set(uid, []);
+    byUser.get(uid).push(m);
+  }
+  const consolidated = [];
+  for (const [, rows] of byUser.entries()) {
+    if (rows.length === 1) {
+      consolidated.push(rows[0]);
+      continue;
+    }
+    const primary = { ...rows[0] };
+    const latest = rows[rows.length - 1];
+    const mergedHistory = [];
+    for (const r of rows) {
+      const hist = Array.isArray(r.history) && r.history.length > 0 ? r.history : [
+        { id: 'msg_q_' + r.id, sender: 'client', text: r.question || '', audio: r.questionAudio || null, productId: r.productId, productTitle: r.productTitle, productImage: r.productImage, productLink: r.productLink, createdAt: r.createdAt },
+        ...(r.reply || r.replyAudio ? [{ id: 'msg_r_' + r.id, sender: 'admin', text: r.reply || '', audio: r.replyAudio || null, createdAt: r.repliedAt || r.createdAt }] : [])
+      ];
+      mergedHistory.push(...hist);
+    }
+    mergedHistory.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+    primary.history = mergedHistory;
+    primary.phone = latest.phone || primary.phone;
+    primary.productId = latest.productId || primary.productId;
+    primary.productTitle = latest.productTitle || primary.productTitle;
+    primary.productImage = latest.productImage || primary.productImage;
+    primary.productLink = latest.productLink || primary.productLink;
+    primary.question = latest.question;
+    primary.questionAudio = latest.questionAudio;
+    primary.reply = latest.reply;
+    primary.replyAudio = latest.replyAudio;
+    primary.status = mergedHistory[mergedHistory.length - 1]?.sender === 'client' ? 'pending' : latest.status;
+    primary.createdAt = latest.createdAt;
+    primary.repliedAt = latest.repliedAt;
+    consolidated.push(primary);
+  }
+  consolidated.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  writeJson(MESSAGES_FILE, consolidated);
 }
 
 // --- MENSAGENS ---
@@ -173,6 +307,10 @@ function formatMessageRow(r) {
         sender: 'client',
         text: r.question || '',
         audio: r.question_audio || null,
+        productId: r.product_id || null,
+        productTitle: r.product_title || null,
+        productImage: r.product_image || null,
+        productLink: r.product_link || null,
         createdAt: r.created_at
       });
     }
@@ -234,6 +372,10 @@ async function getMessages(userId = null) {
           sender: 'client',
           text: m.question || '',
           audio: m.questionAudio || null,
+          productId: m.productId || null,
+          productTitle: m.productTitle || null,
+          productImage: m.productImage || null,
+          productLink: m.productLink || null,
           createdAt: m.createdAt
         });
       }
@@ -258,18 +400,62 @@ async function getMessages(userId = null) {
 }
 
 async function addMessage(msg) {
-  if (!msg.history || !Array.isArray(msg.history) || msg.history.length === 0) {
-    msg.history = [{
-      id: 'sub_' + crypto.randomUUID().slice(0, 8),
-      sender: 'client',
-      text: msg.question || '',
-      audio: msg.questionAudio || null,
-      createdAt: msg.createdAt
-    }];
-  }
+  const newEntry = {
+    id: 'sub_' + crypto.randomUUID().slice(0, 8),
+    sender: 'client',
+    text: msg.question || '',
+    audio: msg.questionAudio || null,
+    productId: msg.productId || null,
+    productTitle: msg.productTitle || null,
+    productImage: msg.productImage || null,
+    productLink: msg.productLink || null,
+    createdAt: msg.createdAt
+  };
 
+  // Agrupa TUDO em 1 única conversa por userId!
   if (usePostgres) {
     try {
+      const existingRes = await pool.query(
+        'SELECT * FROM app_messages WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
+        [msg.userId]
+      );
+
+      if (existingRes.rows.length > 0) {
+        const existing = formatMessageRow(existingRes.rows[0]);
+        const updatedHistory = [...(existing.history || []), newEntry];
+        const updRes = await pool.query(
+          `UPDATE app_messages
+           SET username = COALESCE($1, username),
+               phone = COALESCE($2, phone),
+               product_id = COALESCE($3, product_id),
+               product_title = COALESCE($4, product_title),
+               product_image = COALESCE($5, product_image),
+               product_link = COALESCE($6, product_link),
+               question = $7,
+               question_audio = $8,
+               status = 'pending',
+               history = $9,
+               created_at = $10
+           WHERE id = $11 RETURNING *`,
+          [
+            msg.username || existing.username,
+            msg.phone || existing.phone,
+            msg.productId || existing.productId,
+            msg.productTitle || existing.productTitle,
+            msg.productImage || existing.productImage,
+            msg.productLink || existing.productLink,
+            msg.question || '',
+            msg.questionAudio || null,
+            JSON.stringify(updatedHistory),
+            msg.createdAt,
+            existing.id
+          ]
+        );
+        return formatMessageRow(updRes.rows[0]);
+      }
+
+      // Primeira conversa deste cliente
+      msg.history = [newEntry];
       await pool.query(
         `INSERT INTO app_messages (id, user_id, username, phone, product_id, product_title, product_image, product_link, question, question_audio, reply, reply_audio, status, history, created_at, replied_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
@@ -292,15 +478,52 @@ async function addMessage(msg) {
           msg.repliedAt || null
         ]
       );
+      return msg;
     } catch (err) {
       console.error('Erro addMessage Postgres:', err);
     }
   }
 
-  // Mantém arquivo JSON atualizado também
+  // Fallback JSON: também agrupa em 1 única conversa por userId
   const messages = readJson(MESSAGES_FILE, []);
+  const existingIdx = messages.findIndex(m => m.userId === msg.userId);
+  if (existingIdx !== -1) {
+    const existing = messages[existingIdx];
+    const hist = Array.isArray(existing.history) && existing.history.length > 0 ? [...existing.history] : [
+      {
+        id: 'msg_q_' + existing.id,
+        sender: 'client',
+        text: existing.question || '',
+        audio: existing.questionAudio || null,
+        productId: existing.productId || null,
+        productTitle: existing.productTitle || null,
+        productImage: existing.productImage || null,
+        productLink: existing.productLink || null,
+        createdAt: existing.createdAt
+      }
+    ];
+    hist.push(newEntry);
+    existing.username = msg.username || existing.username;
+    existing.phone = msg.phone || existing.phone;
+    existing.productId = msg.productId || existing.productId;
+    existing.productTitle = msg.productTitle || existing.productTitle;
+    existing.productImage = msg.productImage || existing.productImage;
+    existing.productLink = msg.productLink || existing.productLink;
+    existing.question = msg.question || '';
+    existing.questionAudio = msg.questionAudio || null;
+    existing.status = 'pending';
+    existing.history = hist;
+    existing.createdAt = msg.createdAt;
+    messages.splice(existingIdx, 1);
+    messages.unshift(existing);
+    writeJson(MESSAGES_FILE, messages);
+    return existing;
+  }
+
+  msg.history = [newEntry];
   messages.unshift(msg);
   writeJson(MESSAGES_FILE, messages);
+  return msg;
 }
 
 async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {

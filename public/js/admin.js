@@ -1,16 +1,166 @@
-// Painel do Administrador - Gestão de Dúvidas dos Clientes e Robô de Ofertas
+// Painel do Administrador - Segurança & Autenticação
 let socket = null;
 let currentMsgId = null;
 let messagesList = [];
 let soundEnabled = true;
 let allDeals = [];
+let adminToken = localStorage.getItem('suapromo_admin_token');
 
 document.addEventListener('DOMContentLoaded', () => {
+  verifyAdminAuth();
+  setupFilterInput();
+});
+
+// Verifica se a sessão do administrador é válida
+async function verifyAdminAuth() {
+  if (!adminToken) {
+    showLockScreen();
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/admin/verify', {
+      headers: { 'x-admin-token': adminToken }
+    });
+
+    if (res.ok) {
+      unlockDashboard();
+    } else {
+      showLockScreen();
+    }
+  } catch (err) {
+    showLockScreen();
+  }
+}
+
+function showLockScreen() {
+  document.getElementById('admin-lock-screen').style.display = 'flex';
+  document.getElementById('admin-app').style.display = 'none';
+  setTimeout(() => {
+    const input = document.getElementById('admin-pass-input');
+    if (input) input.focus();
+  }, 100);
+}
+
+function unlockDashboard() {
+  document.getElementById('admin-lock-screen').style.display = 'none';
+  document.getElementById('admin-app').style.display = 'flex';
   initAdminSocket();
   loadAdminMessages();
   loadDealsList();
-  setupFilterInput();
-});
+}
+
+// Login do Administrador
+async function handleAdminLogin(e) {
+  e.preventDefault();
+  const input = document.getElementById('admin-pass-input');
+  const errorEl = document.getElementById('admin-login-error');
+  const btn = document.getElementById('btn-admin-login');
+  const password = input.value.trim();
+
+  if (!password) return;
+
+  errorEl.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Verificando senha...';
+
+  try {
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      adminToken = data.token;
+      localStorage.setItem('suapromo_admin_token', adminToken);
+      input.value = '';
+      unlockDashboard();
+      showToast('Acesso concedido! Bem-vindo ao painel.');
+    } else {
+      errorEl.textContent = data.error || 'Senha incorreta. Acesso negado.';
+      errorEl.style.display = 'block';
+      input.select();
+    }
+  } catch (err) {
+    errorEl.textContent = 'Erro de conexão ao autenticar.';
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Entrar no Painel ➜';
+  }
+}
+
+// Logout do Administrador
+async function logoutAdmin() {
+  if (adminToken) {
+    try {
+      await fetch('/api/admin/logout', {
+        method: 'POST',
+        headers: { 'x-admin-token': adminToken }
+      });
+    } catch (e) {}
+  }
+  adminToken = null;
+  localStorage.removeItem('suapromo_admin_token');
+  showLockScreen();
+  showToast('Painel bloqueado com sucesso.');
+}
+
+// Alterar senha do admin
+async function handleChangePassword(e) {
+  e.preventDefault();
+  const newPass = document.getElementById('new-admin-pass').value.trim();
+  const confirmPass = document.getElementById('confirm-admin-pass').value.trim();
+  const msgEl = document.getElementById('pass-change-msg');
+
+  if (newPass.length < 4) {
+    msgEl.textContent = 'A senha deve ter pelo menos 4 caracteres.';
+    msgEl.style.background = '#fef2f2';
+    msgEl.style.color = '#b91c1c';
+    msgEl.style.display = 'block';
+    return;
+  }
+
+  if (newPass !== confirmPass) {
+    msgEl.textContent = 'As senhas digitadas não coincidem.';
+    msgEl.style.background = '#fef2f2';
+    msgEl.style.color = '#b91c1c';
+    msgEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/admin/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': adminToken
+      },
+      body: JSON.stringify({ newPassword: newPass })
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      msgEl.textContent = '✅ Senha alterada com sucesso! Guarde sua nova senha.';
+      msgEl.style.background = '#ecfdf5';
+      msgEl.style.color = '#047857';
+      msgEl.style.display = 'block';
+      document.getElementById('change-pass-form').reset();
+      showToast('Nova senha de administrador salva!');
+    } else {
+      msgEl.textContent = data.error || 'Erro ao alterar senha.';
+      msgEl.style.background = '#fef2f2';
+      msgEl.style.color = '#b91c1c';
+      msgEl.style.display = 'block';
+    }
+  } catch (err) {
+    msgEl.textContent = 'Erro de conexão ao salvar.';
+    msgEl.style.display = 'block';
+  }
+}
 
 // Controle de Tabs
 function switchTab(tabId) {
@@ -28,11 +178,11 @@ function switchTab(tabId) {
 
 // Socket.io do Admin
 function initAdminSocket() {
-  if (typeof io === 'undefined') return;
+  if (typeof io === 'undefined' || !adminToken) return;
   socket = io();
 
   socket.on('connect', () => {
-    socket.emit('admin:join');
+    socket.emit('admin:join', { token: adminToken });
   });
 
   // Nova pergunta enviada por um cliente logado!
@@ -44,7 +194,6 @@ function initAdminSocket() {
     loadAdminMessages();
   });
 
-  // Mensagem atualizada
   socket.on('admin:message_updated', (updated) => {
     loadAdminMessages();
     if (currentMsgId === updated.id) {
@@ -53,10 +202,20 @@ function initAdminSocket() {
   });
 }
 
-// Carrega as perguntas dos clientes
+// Carrega as perguntas dos clientes (com token)
 async function loadAdminMessages() {
+  if (!adminToken) return;
+
   try {
-    const res = await fetch('/api/admin/messages');
+    const res = await fetch('/api/admin/messages', {
+      headers: { 'x-admin-token': adminToken }
+    });
+
+    if (res.status === 401) {
+      logoutAdmin();
+      return;
+    }
+
     messagesList = await res.json();
     renderAdminMessagesSidebar();
     updatePendingBadge();
@@ -65,7 +224,6 @@ async function loadAdminMessages() {
   }
 }
 
-// Renderiza barra lateral de perguntas
 function renderAdminMessagesSidebar() {
   const container = document.getElementById('admin-messages-list');
   const filterVal = document.getElementById('filter-messages-input')?.value.toLowerCase() || '';
@@ -132,7 +290,6 @@ function updatePendingBadge() {
   }
 }
 
-// Seleciona uma mensagem para responder
 function selectAdminMessage(msgId) {
   currentMsgId = msgId;
   const msg = messagesList.find(m => m.id === msgId);
@@ -168,7 +325,6 @@ function selectAdminMessage(msgId) {
   }, 100);
 }
 
-// Renderiza o diálogo da pergunta e da resposta
 function renderActiveThread(msg) {
   const container = document.getElementById('active-thread-scroll');
   container.innerHTML = '';
@@ -176,7 +332,6 @@ function renderActiveThread(msg) {
   const qTime = msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   const rTime = msg.repliedAt ? new Date(msg.repliedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 
-  // Pergunta do cliente
   const qDiv = document.createElement('div');
   qDiv.className = 'desk-bubble desk-bubble-visitor';
   qDiv.innerHTML = `
@@ -186,7 +341,6 @@ function renderActiveThread(msg) {
   `;
   container.appendChild(qDiv);
 
-  // Resposta do admin (se houver)
   if (msg.reply) {
     const rDiv = document.createElement('div');
     rDiv.className = 'desk-bubble desk-bubble-admin';
@@ -201,18 +355,21 @@ function renderActiveThread(msg) {
   container.scrollTop = container.scrollHeight;
 }
 
-// Envia resposta para o cliente
+// Envia resposta
 async function sendReplyToUser(e) {
   if (e) e.preventDefault();
   const input = document.getElementById('admin-reply-input');
   const text = input.value.trim();
 
-  if (!text || !currentMsgId) return;
+  if (!text || !currentMsgId || !adminToken) return;
 
   try {
     const res = await fetch(`/api/admin/reply/${currentMsgId}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': adminToken
+      },
       body: JSON.stringify({ reply: text })
     });
 
@@ -222,9 +379,11 @@ async function sendReplyToUser(e) {
       loadAdminMessages();
       const data = await res.json();
       renderActiveThread(data.message);
+    } else {
+      showToast('Erro ao enviar resposta.');
     }
   } catch (err) {
-    showToast('Erro ao enviar resposta.');
+    showToast('Erro de conexão ao enviar resposta.');
   }
 }
 
@@ -237,11 +396,15 @@ function insertReplyText(text) {
 }
 
 async function deleteCurrentMessage() {
-  if (!currentMsgId) return;
+  if (!currentMsgId || !adminToken) return;
   if (!confirm('Deseja excluir esta dúvida?')) return;
 
   try {
-    const res = await fetch(`/api/admin/message/${currentMsgId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/admin/message/${currentMsgId}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-token': adminToken }
+    });
+
     if (res.ok) {
       showToast('Dúvida excluída com sucesso.');
       currentMsgId = null;
@@ -263,9 +426,10 @@ function setupFilterInput() {
   }
 }
 
-// --- ROBÔ AUTÔNOMO DE OFERTAS ---
-
+// Robô Autônomo (protegido)
 async function triggerAutonomousMiner() {
+  if (!adminToken) return;
+
   const btn = document.getElementById('btn-run-miner');
   const status = document.getElementById('miner-status-text');
 
@@ -274,7 +438,10 @@ async function triggerAutonomousMiner() {
   status.textContent = '';
 
   try {
-    const res = await fetch('/api/miner/run', { method: 'POST' });
+    const res = await fetch('/api/miner/run', {
+      method: 'POST',
+      headers: { 'x-admin-token': adminToken }
+    });
     const data = await res.json();
 
     if (data.success) {

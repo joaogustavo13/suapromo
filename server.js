@@ -47,9 +47,71 @@ function writeJson(file, data) {
 // Inicia o robô autônomo de ofertas do Mercado Livre a cada 30 minutos
 startAutoMiningCron(30);
 
+// --- SEGURANÇA & SESSÃO ADMIN ---
+const adminSessions = new Set();
+
+function getAdminPassword() {
+  if (process.env.ADMIN_PASSWORD) return process.env.ADMIN_PASSWORD.trim();
+  const settings = readJson(SETTINGS_FILE, {});
+  return settings.adminPassword || 'admin123';
+}
+
+function requireAdmin(req, res, next) {
+  const token = req.headers['x-admin-token'];
+  if (!token || !adminSessions.has(token)) {
+    return res.status(401).json({ error: 'Acesso negado. Senha de administrador obrigatória.' });
+  }
+  next();
+}
+
+// Login do Administrador
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  const correct = getAdminPassword();
+
+  if (!password || password !== correct) {
+    return res.status(401).json({ error: 'Senha de administrador incorreta.' });
+  }
+
+  const token = crypto.randomBytes(32).toString('hex');
+  adminSessions.add(token);
+
+  res.json({ success: true, token });
+});
+
+// Verificação de sessão do admin
+app.get('/api/admin/verify', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (token && adminSessions.has(token)) {
+    return res.json({ valid: true });
+  }
+  res.status(401).json({ valid: false });
+});
+
+// Logout do Admin
+app.post('/api/admin/logout', (req, res) => {
+  const token = req.headers['x-admin-token'];
+  if (token) adminSessions.delete(token);
+  res.json({ success: true });
+});
+
+// Alterar senha do admin
+app.post('/api/admin/change-password', requireAdmin, (req, res) => {
+  const { newPassword } = req.body;
+  if (!newPassword || newPassword.trim().length < 4) {
+    return res.status(400).json({ error: 'A nova senha deve ter pelo menos 4 caracteres.' });
+  }
+
+  const settings = readJson(SETTINGS_FILE, {});
+  settings.adminPassword = newPassword.trim();
+  writeJson(SETTINGS_FILE, settings);
+
+  res.json({ success: true, message: 'Senha alterada com sucesso!' });
+});
+
 // --- ROTAS DE PRODUTOS & AUTOMAÇÃO ---
 
-// Produtos da vitrine
+// Produtos da vitrine (público)
 app.get('/api/products', (req, res) => {
   let products = readJson(PRODUCTS_FILE, []);
   const { search, category } = req.query;
@@ -70,8 +132,15 @@ app.get('/api/products', (req, res) => {
   res.json(products);
 });
 
-// Acionamento manual do robô autônomo
-app.post('/api/miner/run', async (req, res) => {
+// Configurações públicas
+app.get('/api/settings', (req, res) => {
+  const settings = readJson(SETTINGS_FILE, {});
+  const { adminPassword, ...publicSettings } = settings;
+  res.json(publicSettings);
+});
+
+// Acionamento manual do robô autônomo (protegido)
+app.post('/api/miner/run', requireAdmin, async (req, res) => {
   try {
     const result = await runAutonomousMining();
     res.json(result);
@@ -171,17 +240,17 @@ app.post('/api/user/messages', (req, res) => {
   res.status(201).json({ success: true, message: newMsg });
 });
 
-// --- ADMINISTRAÇÃO DAS MENSAGENS ---
+// --- ADMINISTRAÇÃO DAS MENSAGENS (PROTEGIDAS COM requireAdmin) ---
 
 // Lista todas as dúvidas
-app.get('/api/admin/messages', (req, res) => {
+app.get('/api/admin/messages', requireAdmin, (req, res) => {
   const messages = readJson(MESSAGES_FILE, []);
   messages.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json(messages);
 });
 
 // Dono responde à dúvida
-app.post('/api/admin/reply/:id', (req, res) => {
+app.post('/api/admin/reply/:id', requireAdmin, (req, res) => {
   const { id } = req.params;
   const { reply } = req.body;
 
@@ -211,7 +280,7 @@ app.post('/api/admin/reply/:id', (req, res) => {
 });
 
 // Exclui mensagem
-app.delete('/api/admin/message/:id', (req, res) => {
+app.delete('/api/admin/message/:id', requireAdmin, (req, res) => {
   let messages = readJson(MESSAGES_FILE, []);
   messages = messages.filter(m => m.id !== req.params.id);
   writeJson(MESSAGES_FILE, messages);
@@ -227,16 +296,19 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Admin entra na sala admin
-  socket.on('admin:join', () => {
-    socket.join('admin-room');
+  // Admin entra na sala admin COM VERIFICAÇÃO DE TOKEN
+  socket.on('admin:join', ({ token } = {}) => {
+    if (token && adminSessions.has(token)) {
+      socket.join('admin-room');
+      socket.isAdmin = true;
+    }
   });
 });
 
 // Inicialização
 server.listen(PORT, () => {
   console.log(`=======================================================`);
-  console.log(`🤖 Robô Autônomo & Sistema com Nome e Senha Ativos!`);
+  console.log(`🔒 Painel Admin com Autenticação de Segurança Ativa!`);
   console.log(`🌐 Vitrine: http://localhost:${PORT}`);
   console.log(`💬 Painel Admin: http://localhost:${PORT}/admin.html`);
   console.log(`=======================================================`);

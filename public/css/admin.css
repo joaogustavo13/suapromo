@@ -990,3 +990,148 @@ body {
   font-weight: 700;
   color: #0284c7;
 }
+
+/* ========================================= */
+/* TELA DE BLOQUEIO DE ADMIN (LOCK SCREEN) */
+/* ========================================= */
+.admin-lock-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999999;
+  padding: 20px;
+}
+
+.admin-lock-card {
+  background: #ffffff;
+  width: 100%;
+  max-width: 440px;
+  border-radius: 16px;
+  padding: 36px 32px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4);
+  text-align: center;
+}
+
+.lock-icon-wrap {
+  width: 64px;
+  height: 64px;
+  background: #ede9fe;
+  color: #6366f1;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+}
+
+.lock-brand h2 {
+  font-size: 1.6rem;
+  font-weight: 900;
+  color: #1e1b4b;
+  margin-bottom: 4px;
+}
+
+.lock-brand h2 span {
+  color: #ff4757;
+}
+
+.lock-badge {
+  display: inline-block;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.5px;
+  margin-bottom: 14px;
+}
+
+.lock-desc {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-bottom: 24px;
+  line-height: 1.45;
+}
+
+.admin-lock-card .form-group {
+  text-align: left;
+  margin-bottom: 16px;
+}
+
+.admin-lock-card label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.admin-lock-card input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.admin-lock-card input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.lock-error-msg {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+.btn-lock-submit {
+  width: 100%;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.btn-lock-submit:hover {
+  background: #4f46e5;
+  transform: translateY(-1px);
+}
+
+.btn-lock-logout {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-lock-logout:hover {
+  background: #ef4444;
+  color: #fff;
+}

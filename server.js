@@ -5,6 +5,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const webpush = require('web-push');
 const { runAutonomousMining, startAutoMiningCron } = require('./auto-miner');
 
 const app = express();
@@ -17,6 +18,7 @@ const PRODUCTS_FILE = path.join(DATA_DIR, 'products.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
+const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 
 // Middlewares
 app.use(cors());
@@ -41,6 +43,47 @@ function writeJson(file, data) {
     return true;
   } catch (err) {
     return false;
+  }
+}
+
+// Configuração VAPID Web Push (Notificações mesmo com navegador/site fechado)
+const initialSettings = readJson(SETTINGS_FILE, {});
+if (initialSettings.vapidPublicKey && initialSettings.vapidPrivateKey) {
+  try {
+    webpush.setVapidDetails(
+      'mailto:contato@suapromo.com',
+      initialSettings.vapidPublicKey,
+      initialSettings.vapidPrivateKey
+    );
+    console.log('✅ WebPush configurado com chaves VAPID.');
+  } catch (err) {
+    console.error('Erro ao configurar VAPID WebPush:', err);
+  }
+}
+
+// Envia Push Notification nativa para dispositivos inscritos do usuário
+async function sendPushNotificationToUser(userId, payload) {
+  const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
+  const userSubs = subscriptions[userId] || [];
+  if (userSubs.length === 0) return;
+
+  const validSubs = [];
+  for (const sub of userSubs) {
+    try {
+      await webpush.sendNotification(sub, JSON.stringify(payload));
+      validSubs.push(sub);
+    } catch (err) {
+      console.warn(`[WebPush] Aviso envio para ${userId}:`, err.statusCode || err.message);
+      // Se 410 (Gone) ou 404 (Not Found), a inscrição foi revogada no dispositivo
+      if (err.statusCode !== 410 && err.statusCode !== 404) {
+        validSubs.push(sub);
+      }
+    }
+  }
+
+  if (validSubs.length !== userSubs.length) {
+    subscriptions[userId] = validSubs;
+    writeJson(SUBSCRIPTIONS_FILE, subscriptions);
   }
 }
 
@@ -272,11 +315,48 @@ app.post('/api/admin/reply/:id', requireAdmin, (req, res) => {
 
   writeJson(MESSAGES_FILE, messages);
 
-  // Notifica via Socket o usuário (Web Notification se estiver online)
+  // Notifica via Socket o usuário (se estiver com a página aberta)
   io.to(`user_${messages[index].userId}`).emit('user:message_answered', messages[index]);
   io.to('admin-room').emit('admin:message_updated', messages[index]);
 
+  // Notifica via Web Push (funciona MESMO COM A PÁGINA OU NAVEGADOR FECHADOS)
+  sendPushNotificationToUser(messages[index].userId, {
+    title: 'Sua Promo • Resposta do Vendedor',
+    body: `Oferta "${messages[index].productTitle ? messages[index].productTitle.substring(0, 40) + '...' : 'Produto'}": ${reply.trim()}`,
+    icon: messages[index].productImage || 'https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.22/mercadolibre/180x180.png',
+    url: '/'
+  });
+
   res.json({ success: true, message: messages[index] });
+});
+
+// --- ROTAS DE WEB PUSH NOTIFICATION ---
+
+// Retorna chave pública VAPID para o cliente se inscrever no navegador
+app.get('/api/push-public-key', (req, res) => {
+  const settings = readJson(SETTINGS_FILE, {});
+  res.json({ publicKey: settings.vapidPublicKey || '' });
+});
+
+// Salva inscrição Push do dispositivo do usuário
+app.post('/api/user/push-subscription', (req, res) => {
+  const { userId, subscription } = req.body;
+  if (!userId || !subscription || !subscription.endpoint) {
+    return res.status(400).json({ error: 'Inscrição push inválida.' });
+  }
+
+  const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
+  if (!subscriptions[userId]) {
+    subscriptions[userId] = [];
+  }
+
+  const exists = subscriptions[userId].some(s => s.endpoint === subscription.endpoint);
+  if (!exists) {
+    subscriptions[userId].push(subscription);
+    writeJson(SUBSCRIPTIONS_FILE, subscriptions);
+  }
+
+  res.json({ success: true });
 });
 
 // Exclui mensagem

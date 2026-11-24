@@ -13,8 +13,12 @@ try {
 document.addEventListener('DOMContentLoaded', () => {
   renderHeaderUserArea();
   initUserSocket();
+  registerServiceWorker();
   if (currentUser) {
     loadUserMessages();
+    if ('Notification' in window && Notification.permission === 'granted') {
+      subscribeUserToPush();
+    }
   }
 });
 
@@ -250,8 +254,11 @@ function renderUserMessagesList() {
     userInfo.textContent = `Conta: ${currentUser.username}`;
   }
 
+  const pushBanner = getPushStatusBanner();
+
   if (!userMessages || userMessages.length === 0) {
     container.innerHTML = `
+      ${pushBanner}
       <div class="empty-drawer">
         <p>Você ainda não enviou nenhuma dúvida.</p>
         <small>Clique em "Tirar Dúvida" em qualquer oferta para perguntar ao vendedor!</small>
@@ -260,7 +267,7 @@ function renderUserMessagesList() {
     return;
   }
 
-  container.innerHTML = userMessages.map(m => {
+  container.innerHTML = pushBanner + userMessages.map(m => {
     const isAnswered = m.status === 'answered' && m.reply;
     const statusBadge = isAnswered
       ? `<span class="ticket-status-replied">🟢 Respondido pelo vendedor</span>`
@@ -340,21 +347,132 @@ function closeMessagesCenter() {
   document.getElementById('messages-drawer').classList.remove('open');
 }
 
-// --- NOTIFICAÇÃO WEB DO NAVEGADOR ---
+// --- WEB PUSH COM SERVICE WORKER (FUNCIONA MESMO COM PÁGINA/CELULAR FECHADOS) ---
+let swRegistration = null;
 
-function requestWebNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    const reg = await navigator.serviceWorker.register('/service-worker.js');
+    swRegistration = reg;
+    return reg;
+  } catch (err) {
+    console.warn('Falha ao registrar Service Worker:', err);
+    return null;
+  }
+}
+
+async function subscribeUserToPush() {
+  if (!currentUser) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+  try {
+    const reg = swRegistration || (await registerServiceWorker());
+    if (!reg) return;
+
+    const res = await fetch('/api/push-public-key');
+    const { publicKey } = await res.json();
+    if (!publicKey) return;
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+    }
+
+    await fetch('/api/user/push-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: currentUser.id,
+        subscription: sub
+      })
+    });
+    console.log('✅ Dispositivo inscrito com sucesso para Web Push:', currentUser.username);
+  } catch (err) {
+    console.warn('Erro ao registrar inscrição WebPush:', err);
+  }
+}
+
+async function requestWebNotificationPermission() {
+  if (!('Notification' in window)) {
+    showToast('Seu navegador não suporta notificações web.');
+    return;
+  }
+
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      await subscribeUserToPush();
+      showToast('🔔 Notificações ativadas! Você será avisado no celular/computador.');
+      renderUserMessagesList();
+    } else {
+      showToast('Notificações não foram autorizadas.');
+      renderUserMessagesList();
+    }
+  } catch (err) {
+    console.warn('Erro ao solicitar permissão de notificação:', err);
+  }
+}
+
+function getPushStatusBanner() {
+  if (!('Notification' in window)) return '';
+
+  if (Notification.permission === 'granted') {
+    return `
+      <div class="push-permission-card active">
+        <span>🔔 <strong>Notificações no celular ativas:</strong> Você será notificado mesmo se fechar este site!</span>
+      </div>
+    `;
+  } else if (Notification.permission === 'default') {
+    return `
+      <div class="push-permission-card prompt">
+        <div>
+          <strong>🔔 Receber resposta no celular?</strong>
+          <div>Ative para ser avisado mesmo com o site fechado.</div>
+        </div>
+        <button class="btn-enable-push" onclick="requestWebNotificationPermission()">Ativar Notificações</button>
+      </div>
+    `;
+  } else {
+    return `
+      <div class="push-permission-card denied">
+        <span>⚠️ Notificações desativadas. Para receber avisos com o site fechado, ative nas configurações do navegador.</span>
+      </div>
+    `;
   }
 }
 
 function triggerBrowserWebNotification(msg) {
   if ('Notification' in window && Notification.permission === 'granted') {
     try {
-      new Notification('💬 Resposta do Vendedor - Mercado Livre', {
-        body: `${msg.productTitle ? msg.productTitle + ': ' : ''}${msg.reply}`,
-        icon: msg.productImage || '/favicon.ico'
-      });
+      if (swRegistration && swRegistration.showNotification) {
+        swRegistration.showNotification('Sua Promo • Resposta do Vendedor', {
+          body: `${msg.productTitle ? msg.productTitle + ': ' : ''}${msg.reply}`,
+          icon: msg.productImage || 'https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.22/mercadolibre/180x180.png',
+          data: { url: '/' }
+        });
+      } else {
+        new Notification('Sua Promo • Resposta do Vendedor', {
+          body: `${msg.productTitle ? msg.productTitle + ': ' : ''}${msg.reply}`,
+          icon: msg.productImage || '/favicon.ico'
+        });
+      }
     } catch (e) {}
   }
 }

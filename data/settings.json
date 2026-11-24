@@ -9,5 +9,7 @@
   "telegramChatId": "",
   "adminName": "Sua Promo | Atendimento",
   "welcomeMessage": "Tem dúvidas sobre frete, cupom ou estoque dos produtos? Deixe sua dúvida aqui que te respondo rapidinho!",
-  "adminPassword": "Paquistao01"
+  "adminPassword": "Paquistao01",
+  "vapidPublicKey": "BDESWbqAKCC4zHdEJClCQmcG9n1ZwNHGTnKuJYF7ee0ywCEZa0J93sJdUosdEKve4TLkVmjccT-8LOs1_UMROtQ",
+  "vapidPrivateKey": "_-rE3jb0yxr4PSO79pCNcQiCoc3jC3Fo1w1u-c8yVPM"
 }

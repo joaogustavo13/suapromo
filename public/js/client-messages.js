@@ -14,11 +14,19 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHeaderUserArea();
   initUserSocket();
   registerServiceWorker();
+
+  // Se já tiver permissão concedida, sincroniza na hora (mesmo deslogado)
+  if ('Notification' in window && Notification.permission === 'granted') {
+    subscribeUserToPush();
+  } else if ('Notification' in window && Notification.permission === 'default') {
+    // Se ainda não escolheu, convida após 1.5s
+    setTimeout(() => {
+      openPushPromptModal();
+    }, 1500);
+  }
+
   if (currentUser) {
     loadUserMessages();
-    if ('Notification' in window && Notification.permission === 'granted') {
-      subscribeUserToPush();
-    }
   }
 });
 
@@ -409,8 +417,9 @@ function openPushPromptModal() {
 function closePushPromptModal() {
   const modal = document.getElementById('push-prompt-modal');
   if (modal) modal.style.display = 'none';
-  openMessagesCenter();
-  loadUserMessages();
+  if (currentUser) {
+    loadUserMessages();
+  }
 }
 
 function triggerNotificationPrompt() {
@@ -424,7 +433,6 @@ function triggerNotificationPrompt() {
 }
 
 async function subscribeUserToPush() {
-  if (!currentUser) return;
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
   try {
@@ -447,12 +455,12 @@ async function subscribeUserToPush() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        userId: currentUser.id,
+        userId: currentUser ? currentUser.id : 'anonymous',
         subscription: sub
       })
     });
     if (saveRes.ok) {
-      console.log('✅ Inscrição Web Push salva no servidor com sucesso para:', currentUser.username);
+      console.log('✅ Inscrição Web Push salva no servidor com sucesso para:', currentUser ? currentUser.username : 'visitante');
     }
   } catch (err) {
     console.warn('Erro ao registrar inscrição WebPush:', err);

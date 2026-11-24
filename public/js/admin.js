@@ -548,6 +548,51 @@ function playAlertSound() {
   } catch (e) {}
 }
 
+// Disparo de notificação Push para todos os celulares cadastrados
+async function triggerAdminBroadcast() {
+  if (!adminToken) {
+    showToast('Acesso não autenticado.');
+    return;
+  }
+
+  const confirmSend = confirm('Deseja disparar uma notificação Push agora para TODOS os celulares cadastrados no site?');
+  if (!confirmSend) return;
+
+  const btn = document.getElementById('btn-broadcast');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = 'Enviando...';
+  }
+
+  try {
+    const res = await fetch('/api/admin/broadcast-push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': adminToken
+      },
+      body: JSON.stringify({
+        title: 'Sua Promo 🔥',
+        body: 'Temos uma promoção para você! Toque para conferir.'
+      })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showToast(`📢 Notificação disparada com sucesso para ${data.sent} celulares!`);
+    } else {
+      showToast(`Aviso: ${data.sent || 0} celulares receberam a notificação.`);
+    }
+  } catch (err) {
+    showToast('Erro de conexão ao disparar notificação.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '🚀 <span>Disparar Notificação Geral</span>';
+    }
+  }
+}
+
 function showToast(msg) {
   const toast = document.getElementById('toast');
   if (!toast) return;

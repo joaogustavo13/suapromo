@@ -61,7 +61,7 @@ if (initialSettings.vapidPublicKey && initialSettings.vapidPrivateKey) {
   }
 }
 
-// Envia Push Notification nativa para dispositivos inscritos do usuário
+// Envia Push Notification para dispositivos inscritos de um usuário específico
 async function sendPushNotificationToUser(userId, payload) {
   const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
   const userSubs = subscriptions[userId] || [];
@@ -87,6 +87,46 @@ async function sendPushNotificationToUser(userId, payload) {
     subscriptions[userId] = validSubs;
     writeJson(SUBSCRIPTIONS_FILE, subscriptions);
   }
+}
+
+// Dispara Notificação Push para TODOS os celulares/computadores cadastrados no site (logados ou não)
+async function broadcastPushNotification(payload) {
+  const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
+  const allEndpoints = new Set();
+  const allSubs = [];
+
+  for (const key in subscriptions) {
+    const list = subscriptions[key] || [];
+    for (const sub of list) {
+      if (sub && sub.endpoint && !allEndpoints.has(sub.endpoint)) {
+        allEndpoints.add(sub.endpoint);
+        allSubs.push({ key, sub });
+      }
+    }
+  }
+
+  console.log(`[WebPush Broadcast] Disparando para todos os ${allSubs.length} celulares/dispositivos cadastrados...`);
+  if (allSubs.length === 0) return { success: true, count: 0 };
+
+  let successCount = 0;
+  for (const item of allSubs) {
+    try {
+      await webpush.sendNotification(item.sub, JSON.stringify(payload));
+      console.log(`[WebPush Broadcast] ✅ Push entregue: ${item.sub.endpoint.substring(0, 45)}...`);
+      successCount++;
+    } catch (err) {
+      console.warn(`[WebPush Broadcast] ❌ Erro em dispositivo:`, err.statusCode || err.message);
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        if (subscriptions[item.key]) {
+          subscriptions[item.key] = subscriptions[item.key].filter(s => s.endpoint !== item.sub.endpoint);
+        }
+      }
+    }
+  }
+
+  writeJson(SUBSCRIPTIONS_FILE, subscriptions);
+  console.log(`[WebPush Broadcast] Concluído: ${successCount}/${allSubs.length} celulares notificados.`);
+  return { success: true, sent: successCount, total: allSubs.length };
 }
 
 // Inicia o robô autônomo de ofertas do Mercado Livre a cada 30 minutos
@@ -322,8 +362,8 @@ app.post('/api/admin/reply/:id', requireAdmin, (req, res) => {
   io.to(`user_${messages[index].userId}`).emit('user:message_answered', messages[index]);
   io.to('admin-room').emit('admin:message_updated', messages[index]);
 
-  // Notifica via Web Push (funciona MESMO COM A PÁGINA OU NAVEGADOR FECHADOS)
-  sendPushNotificationToUser(messages[index].userId, {
+  // Notifica via Web Push para TODOS os celulares cadastrados (mesmo site fechado)
+  broadcastPushNotification({
     title: 'Sua Promo 🔥',
     body: 'Temos uma promoção para você! Toque para conferir.',
     icon: '/icons/icon-192.png',
@@ -341,26 +381,47 @@ app.get('/api/push-public-key', (req, res) => {
   res.json({ publicKey: settings.vapidPublicKey || '' });
 });
 
-// Salva inscrição Push do dispositivo do usuário
+// Salva inscrição Push do dispositivo (funciona logado ou NÃO LOGADO / visitante)
 app.post('/api/user/push-subscription', (req, res) => {
   const { userId, subscription } = req.body;
-  if (!userId || !subscription || !subscription.endpoint) {
+  if (!subscription || !subscription.endpoint) {
     return res.status(400).json({ error: 'Inscrição push inválida.' });
   }
 
+  const effectiveUserId = userId || 'anonymous';
   const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
-  if (!subscriptions[userId]) {
-    subscriptions[userId] = [];
+  if (!subscriptions[effectiveUserId]) {
+    subscriptions[effectiveUserId] = [];
   }
 
-  const exists = subscriptions[userId].some(s => s.endpoint === subscription.endpoint);
+  // Remove o mesmo endpoint de outros grupos para evitar duplicidade
+  for (const k in subscriptions) {
+    if (k !== effectiveUserId) {
+      subscriptions[k] = subscriptions[k].filter(s => s.endpoint !== subscription.endpoint);
+    }
+  }
+
+  const exists = subscriptions[effectiveUserId].some(s => s.endpoint === subscription.endpoint);
   if (!exists) {
-    subscriptions[userId].push(subscription);
+    subscriptions[effectiveUserId].push(subscription);
     writeJson(SUBSCRIPTIONS_FILE, subscriptions);
-    console.log(`[WebPush] ✅ Dispositivo registrado para ${userId}. Total: ${subscriptions[userId].length}`);
+    console.log(`[WebPush] ✅ Dispositivo registrado para ${effectiveUserId}. Total no grupo: ${subscriptions[effectiveUserId].length}`);
   }
 
   res.json({ success: true });
+});
+
+// Disparo Manual de Push para TODOS os celulares (Admin)
+app.post('/api/admin/broadcast-push', requireAdmin, async (req, res) => {
+  const { title, body } = req.body;
+  const payload = {
+    title: (title && title.trim()) || 'Sua Promo 🔥',
+    body: (body && body.trim()) || 'Temos uma promoção para você! Toque para conferir.',
+    icon: '/icons/icon-192.png',
+    url: '/'
+  };
+  const result = await broadcastPushNotification(payload);
+  res.json(result);
 });
 
 // Rota de status para ver quantos celulares/computadores estão inscritos

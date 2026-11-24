@@ -140,16 +140,46 @@ async function broadcastPushNotification(payload) {
 function sendAudioToTelegram(token, chatId, msg) {
   return new Promise((resolve) => {
     try {
-      const match = (msg.questionAudio || '').match(/^data:audio\/([a-zA-Z0-9.-]+);base64,(.+)$/);
-      if (!match) return resolve(false);
+      const rawAudio = msg.questionAudio || '';
+      const base64Marker = ';base64,';
+      const idx = rawAudio.indexOf(base64Marker);
+      if (idx === -1) {
+        console.warn('🤖 [Telegram Bot] Formato de áudio inválido (sem marcador base64).');
+        return resolve(false);
+      }
 
-      const ext = match[1].includes('mp4') ? 'm4a' : (match[1].includes('webm') ? 'webm' : 'ogg');
-      const audioBuffer = Buffer.from(match[2], 'base64');
+      const mimePart = rawAudio.slice(5, idx).toLowerCase();
+      const base64Payload = rawAudio.slice(idx + base64Marker.length);
+      if (!base64Payload) return resolve(false);
+
+      let ext = 'webm';
+      let contentType = 'audio/webm';
+      if (mimePart.includes('mp4') || mimePart.includes('m4a')) {
+        ext = 'm4a';
+        contentType = 'audio/mp4';
+      } else if (mimePart.includes('aac')) {
+        ext = 'aac';
+        contentType = 'audio/aac';
+      } else if (mimePart.includes('ogg')) {
+        ext = 'ogg';
+        contentType = 'audio/ogg';
+      } else if (mimePart.includes('wav')) {
+        ext = 'wav';
+        contentType = 'audio/wav';
+      } else if (mimePart.includes('mpeg') || mimePart.includes('mp3')) {
+        ext = 'mp3';
+        contentType = 'audio/mpeg';
+      }
+
+      const audioBuffer = Buffer.from(base64Payload, 'base64');
 
       const phoneInfo = msg.phone ? `\n📱 WhatsApp: ${msg.phone}` : '';
       const prodInfo = msg.productTitle ? `\n🏷️ Oferta: ${msg.productTitle}` : '';
+      const hasCustomText = msg.question && !msg.question.startsWith('🎤 [');
+      const textLine = hasCustomText ? `\n💬 Texto: "${msg.question}"` : '';
+
       const caption = `🎤 ÁUDIO DO CLIENTE NO SUA PROMO!\n\n` +
-        `👤 Cliente: ${msg.username}${phoneInfo}${prodInfo}\n\n` +
+        `👤 Cliente: ${msg.username}${phoneInfo}${prodInfo}${textLine}\n\n` +
         `👉 Toque para ouvir o áudio do cliente e responda no painel:`;
 
       const inlineKeyboard = {
@@ -163,7 +193,7 @@ function sendAudioToTelegram(token, chatId, msg) {
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${String(chatId).trim()}\r\n`));
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}\r\n`));
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="reply_markup"\r\n\r\n${JSON.stringify(inlineKeyboard)}\r\n`));
-      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="audio_${msg.id}.${ext}"\r\nContent-Type: audio/${ext}\r\n\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="audio_${msg.id || 'msg'}.${ext}"\r\nContent-Type: ${contentType}\r\n\r\n`));
       parts.push(audioBuffer);
       parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
 
@@ -178,7 +208,7 @@ function sendAudioToTelegram(token, chatId, msg) {
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
           'Content-Length': fullLen
         },
-        timeout: 20000
+        timeout: 25000
       }, res => {
         let body = '';
         res.on('data', c => body += c);
@@ -203,6 +233,12 @@ function sendAudioToTelegram(token, chatId, msg) {
         resolve(false);
       });
 
+      req.on('timeout', () => {
+        req.destroy();
+        console.error('🤖 [Telegram Bot] Timeout ao enviar áudio para Telegram');
+        resolve(false);
+      });
+
       parts.forEach(p => req.write(p));
       req.end();
     } catch (err) {
@@ -223,8 +259,10 @@ async function notifyOwnerViaTelegram(msg) {
   }
 
   // Se o cliente enviou áudio, despacha o arquivo de áudio diretamente para o Telegram do dono!
-  if (msg.questionAudio && msg.questionAudio.startsWith('data:audio/')) {
-    return sendAudioToTelegram(token, chatId, msg);
+  if (msg.questionAudio && msg.questionAudio.startsWith('data:audio')) {
+    const audioSent = await sendAudioToTelegram(token, chatId, msg);
+    if (audioSent) return true;
+    console.warn('🤖 [Telegram Bot] Fallback para alerta em texto após falha no sendAudio.');
   }
 
   const phoneInfo = msg.phone ? `\n📱 WhatsApp do Cliente: ${msg.phone}` : '';

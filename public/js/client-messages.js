@@ -342,7 +342,147 @@ async function loadUserMessages() {
   }
 }
 
-// Renderiza a lista de mensagens na gaveta
+// --- GRAVADOR E RESPOSTA CONTÍNUA DO CLIENTE (CHAT MULTI-MENSAGENS) ---
+let ticketVoiceRecorder = null;
+let ticketRecordedAudio = {};
+let activeRecordingTicketId = null;
+
+function toggleCustomerTicketMic(ticketId) {
+  if (activeRecordingTicketId === ticketId && ticketVoiceRecorder && ticketVoiceRecorder.mediaRecorder && ticketVoiceRecorder.mediaRecorder.state === 'recording') {
+    ticketVoiceRecorder.stop();
+    return;
+  }
+
+  if (ticketVoiceRecorder) {
+    ticketVoiceRecorder.cancel();
+  }
+
+  activeRecordingTicketId = ticketId;
+  ticketVoiceRecorder = new AudioVoiceRecorder({
+    onStateChange: (state, seconds) => {
+      renderTicketRecorderUI(ticketId, state, seconds);
+    },
+    onReady: (base64Audio, seconds) => {
+      ticketRecordedAudio[ticketId] = base64Audio;
+      renderTicketRecorderUI(ticketId, 'ready', seconds);
+    },
+    onCancel: () => {
+      delete ticketRecordedAudio[ticketId];
+      activeRecordingTicketId = null;
+      renderTicketRecorderUI(ticketId, 'idle', 0);
+    }
+  });
+
+  ticketVoiceRecorder.start();
+}
+
+function renderTicketRecorderUI(ticketId, state, seconds = 0) {
+  const container = document.getElementById(`ticket-audio-zone-${ticketId}`);
+  const micBtn = document.getElementById(`btn-ticket-mic-${ticketId}`);
+  if (!container) return;
+
+  if (state === 'idle') {
+    container.innerHTML = '';
+    if (micBtn) {
+      micBtn.textContent = '🎙️';
+      micBtn.style.background = 'rgba(255, 71, 87, 0.12)';
+      micBtn.style.color = '#ff4757';
+    }
+  } else if (state === 'recording') {
+    if (micBtn) {
+      micBtn.textContent = '⏹️';
+      micBtn.style.background = '#ef4444';
+      micBtn.style.color = '#fff';
+    }
+    container.innerHTML = `
+      <div class="recording-active-bar" style="margin: 4px 0; background: rgba(239, 68, 68, 0.15);">
+        <div class="recording-indicator"></div>
+        <span class="recording-timer">${formatAudioSeconds(seconds)}</span>
+        <button type="button" class="btn-record-stop" onclick="stopTicketAudioRecording('${ticketId}')">⏹️ Concluir</button>
+        <button type="button" class="btn-record-cancel" onclick="cancelTicketAudioRecording('${ticketId}')">✕ Cancelar</button>
+      </div>
+    `;
+  } else if (state === 'ready' && ticketRecordedAudio[ticketId]) {
+    if (micBtn) {
+      micBtn.textContent = '🎙️';
+      micBtn.style.background = 'rgba(255, 71, 87, 0.12)';
+      micBtn.style.color = '#ff4757';
+    }
+    container.innerHTML = `
+      <div class="audio-preview-box" style="margin: 4px 0;">
+        <span style="font-size: 0.78rem; font-weight: 700; color: #059669; white-space: nowrap;">✅ Áudio pronto!</span>
+        <div style="flex: 1; min-width: 0;">
+          ${renderAudioPlayer(ticketRecordedAudio[ticketId], 'preview_' + ticketId, 'Prévia do áudio')}
+        </div>
+        <button type="button" class="btn-discard-audio" onclick="discardTicketAudioRecording('${ticketId}')" title="Descartar">
+          🗑️
+        </button>
+      </div>
+    `;
+  }
+}
+
+function stopTicketAudioRecording(ticketId) {
+  if (ticketVoiceRecorder) ticketVoiceRecorder.stop();
+}
+
+function cancelTicketAudioRecording(ticketId) {
+  if (ticketVoiceRecorder) ticketVoiceRecorder.cancel();
+}
+
+function discardTicketAudioRecording(ticketId) {
+  delete ticketRecordedAudio[ticketId];
+  if (ticketVoiceRecorder) ticketVoiceRecorder.cancel();
+  renderTicketRecorderUI(ticketId, 'idle', 0);
+}
+
+async function submitCustomerTicketReply(e, ticketId) {
+  if (e) e.preventDefault();
+  const input = document.getElementById(`ticket-reply-input-${ticketId}`);
+  const text = input ? input.value.trim() : '';
+  const audio = ticketRecordedAudio[ticketId] || null;
+
+  if (!text && !audio) {
+    showToast('Digite uma mensagem ou grave um áudio para responder.');
+    return;
+  }
+
+  const btn = document.getElementById(`btn-ticket-send-${ticketId}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+  }
+
+  try {
+    const res = await fetch(`/api/user/reply/${ticketId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: currentUser.id,
+        reply: text,
+        replyAudio: audio
+      })
+    });
+
+    if (res.ok) {
+      if (input) input.value = '';
+      discardTicketAudioRecording(ticketId);
+      showToast('✅ Mensagem enviada ao vendedor!');
+      await loadUserMessages();
+    } else {
+      showToast('Erro ao enviar resposta.');
+    }
+  } catch (err) {
+    showToast('Erro de conexão ao enviar.');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Enviar';
+    }
+  }
+}
+
+// Renderiza a lista de mensagens na gaveta (Chat Contínuo sem fim)
 function renderUserMessagesList() {
   const container = document.getElementById('drawer-tickets-list');
   const userInfo = document.getElementById('drawer-user-info');
@@ -365,13 +505,39 @@ function renderUserMessagesList() {
   }
 
   container.innerHTML = pushBanner + userMessages.map(m => {
-    const isAnswered = m.status === 'answered' && m.reply;
+    const isAnswered = m.status === 'answered';
     const statusBadge = isAnswered
       ? `<span class="ticket-status-replied">🟢 Respondido</span>`
       : `<span class="ticket-status-pending">🟡 Em análise</span>`;
 
-    const qTime = m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-    const rTime = m.repliedAt ? new Date(m.repliedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    // Histórico completo de mensagens da conversa
+    const hist = Array.isArray(m.history) && m.history.length > 0 ? m.history : [
+      { sender: 'client', text: m.question, audio: m.questionAudio, createdAt: m.createdAt },
+      ...(m.reply || m.replyAudio ? [{ sender: 'admin', text: m.reply, audio: m.replyAudio, createdAt: m.repliedAt }] : [])
+    ];
+
+    const threadBubblesHtml = hist.map(entry => {
+      const time = entry.createdAt ? new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      if (entry.sender === 'client') {
+        return `
+          <div class="ticket-bubble bubble-client">
+            <div class="bubble-sender">Você (${escapeHtml(currentUser.username)})</div>
+            ${entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]' ? `<div class="bubble-text">${escapeHtml(entry.text)}</div>` : ''}
+            ${entry.audio ? renderAudioPlayer(entry.audio, 'c_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Sua dúvida em áudio') : ''}
+            <span class="bubble-time">${time}</span>
+          </div>
+        `;
+      } else {
+        return `
+          <div class="ticket-bubble bubble-admin">
+            <div class="bubble-sender">Equipe Sua Promo</div>
+            ${entry.text && entry.text !== '🎤 [Resposta em Áudio]' ? `<div class="bubble-text">${escapeHtml(entry.text)}</div>` : ''}
+            ${entry.audio ? renderAudioPlayer(entry.audio, 'a_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Resposta em áudio do vendedor') : ''}
+            <span class="bubble-time">${time}</span>
+          </div>
+        `;
+      }
+    }).join('');
 
     return `
       <div class="client-ticket-card">
@@ -387,25 +553,17 @@ function renderUserMessagesList() {
         </div>
 
         <div class="ticket-messages-thread">
-          <div class="ticket-bubble bubble-client">
-            <div class="bubble-sender">Você (${escapeHtml(currentUser.username)})</div>
-            ${m.question && m.question !== '🎤 [Dúvida em Áudio]' ? `<div class="bubble-text">${escapeHtml(m.question)}</div>` : ''}
-            ${m.questionAudio ? renderAudioPlayer(m.questionAudio, 'q_voice_' + m.id, 'Sua dúvida em áudio') : ''}
-            <span class="bubble-time">${qTime}</span>
-          </div>
+          ${threadBubblesHtml}
+        </div>
 
-          ${isAnswered ? `
-            <div class="ticket-bubble bubble-admin">
-              <div class="bubble-sender">Equipe Sua Promo</div>
-              ${m.reply && m.reply !== '🎤 [Resposta em Áudio]' ? `<div class="bubble-text">${escapeHtml(m.reply)}</div>` : ''}
-              ${m.replyAudio ? renderAudioPlayer(m.replyAudio, 'r_voice_' + m.id, 'Resposta em áudio do vendedor') : ''}
-              <span class="bubble-time">${rTime}</span>
-            </div>
-          ` : `
-            <div class="pending-notice">
-              Nossa equipe responderá em breve. Você pode fechar o site e ver os detalhes quando logar novamente!
-            </div>
-          `}
+        <!-- Barra de Réplica / Chat Contínuo para o cliente responder quantas vezes quiser -->
+        <div class="ticket-reply-container">
+          <div id="ticket-audio-zone-${m.id}" class="ticket-audio-zone"></div>
+          <form class="ticket-reply-row" onsubmit="submitCustomerTicketReply(event, '${m.id}')">
+            <button type="button" class="btn-ticket-mic" id="btn-ticket-mic-${m.id}" onclick="toggleCustomerTicketMic('${m.id}')" title="Gravar resposta em áudio">🎙️</button>
+            <input type="text" class="ticket-reply-input" id="ticket-reply-input-${m.id}" placeholder="Escreva uma resposta ou grave um áudio..." autocomplete="off">
+            <button type="submit" class="btn-ticket-send" id="btn-ticket-send-${m.id}">Enviar</button>
+          </form>
         </div>
       </div>
     `;

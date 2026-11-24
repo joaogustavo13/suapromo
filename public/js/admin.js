@@ -445,30 +445,34 @@ function renderActiveThread(msg) {
   const container = document.getElementById('active-thread-scroll');
   container.innerHTML = '';
 
-  const qTime = msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-  const rTime = msg.repliedAt ? new Date(msg.repliedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  // Histórico completo de mensagens (chat contínuo)
+  const hist = Array.isArray(msg.history) && msg.history.length > 0 ? msg.history : [
+    { sender: 'client', text: msg.question, audio: msg.questionAudio, createdAt: msg.createdAt },
+    ...(msg.reply || msg.replyAudio ? [{ sender: 'admin', text: msg.reply, audio: msg.replyAudio, createdAt: msg.repliedAt }] : [])
+  ];
 
-  const qDiv = document.createElement('div');
-  qDiv.className = 'desk-bubble desk-bubble-visitor';
-  qDiv.innerHTML = `
-    <div class="desk-bubble-sender">Cliente (${escapeHtml(msg.username)})</div>
-    ${msg.question && msg.question !== '🎤 [Dúvida em Áudio]' ? `<div>${escapeHtml(msg.question)}</div>` : ''}
-    ${msg.questionAudio ? renderAudioPlayer(msg.questionAudio, 'admin_q_audio_' + msg.id, 'Áudio do cliente') : ''}
-    <span class="desk-bubble-time">${qTime}</span>
-  `;
-  container.appendChild(qDiv);
-
-  if (msg.reply || msg.replyAudio) {
-    const rDiv = document.createElement('div');
-    rDiv.className = 'desk-bubble desk-bubble-admin';
-    rDiv.innerHTML = `
-      <div class="desk-bubble-sender">Você (Atendimento)</div>
-      ${msg.reply && msg.reply !== '🎤 [Resposta em Áudio]' ? `<div>${escapeHtml(msg.reply)}</div>` : ''}
-      ${msg.replyAudio ? renderAudioPlayer(msg.replyAudio, 'admin_r_audio_' + msg.id, 'Seu áudio de resposta') : ''}
-      <span class="desk-bubble-time">${rTime}</span>
-    `;
-    container.appendChild(rDiv);
-  }
+  hist.forEach(entry => {
+    const time = entry.createdAt ? new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    const div = document.createElement('div');
+    if (entry.sender === 'client') {
+      div.className = 'desk-bubble desk-bubble-visitor';
+      div.innerHTML = `
+        <div class="desk-bubble-sender">Cliente (${escapeHtml(msg.username)})</div>
+        ${entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]' ? `<div>${escapeHtml(entry.text)}</div>` : ''}
+        ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio do cliente') : ''}
+        <span class="desk-bubble-time">${time}</span>
+      `;
+    } else {
+      div.className = 'desk-bubble desk-bubble-admin';
+      div.innerHTML = `
+        <div class="desk-bubble-sender">Você (Atendimento)</div>
+        ${entry.text && entry.text !== '🎤 [Resposta em Áudio]' ? `<div>${escapeHtml(entry.text)}</div>` : ''}
+        ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Seu áudio de resposta') : ''}
+        <span class="desk-bubble-time">${time}</span>
+      `;
+    }
+    container.appendChild(div);
+  });
 
   container.scrollTop = container.scrollHeight;
 }

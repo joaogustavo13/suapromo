@@ -75,9 +75,10 @@ async function initDatabase() {
         replied_at TIMESTAMPTZ
       );
 
-      -- Garante novas colunas de áudio caso a tabela já exista
+      -- Garante novas colunas de áudio e histórico de conversa caso a tabela já exista
       ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS question_audio TEXT;
       ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS reply_audio TEXT;
+      ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]';
 
       CREATE TABLE IF NOT EXISTS app_subscriptions (
         endpoint TEXT PRIMARY KEY,
@@ -156,6 +157,56 @@ async function initDatabase() {
 
 // --- MENSAGENS ---
 
+function formatMessageRow(r) {
+  let hist = [];
+  if (Array.isArray(r.history)) {
+    hist = r.history;
+  } else if (typeof r.history === 'string' && r.history.trim()) {
+    try { hist = JSON.parse(r.history); } catch (e) {}
+  }
+  // Se histórico estiver vazio, popula com question e reply para retrocompatibilidade
+  if (!hist || hist.length === 0) {
+    hist = [];
+    if (r.question || r.question_audio) {
+      hist.push({
+        id: 'msg_q_' + r.id,
+        sender: 'client',
+        text: r.question || '',
+        audio: r.question_audio || null,
+        createdAt: r.created_at
+      });
+    }
+    if (r.reply || r.reply_audio) {
+      hist.push({
+        id: 'msg_r_' + r.id,
+        sender: 'admin',
+        text: r.reply || '',
+        audio: r.reply_audio || null,
+        createdAt: r.replied_at || r.created_at
+      });
+    }
+  }
+
+  return {
+    id: r.id,
+    userId: r.user_id,
+    username: r.username,
+    phone: r.phone,
+    productId: r.product_id,
+    productTitle: r.product_title,
+    productImage: r.product_image,
+    productLink: r.product_link,
+    question: r.question,
+    questionAudio: r.question_audio || null,
+    reply: r.reply,
+    replyAudio: r.reply_audio || null,
+    status: r.status,
+    history: hist,
+    createdAt: r.created_at,
+    repliedAt: r.replied_at
+  };
+}
+
 async function getMessages(userId = null) {
   if (usePostgres) {
     try {
@@ -167,30 +218,39 @@ async function getMessages(userId = null) {
       }
       query += ' ORDER BY created_at DESC';
       const res = await pool.query(query, params);
-      return res.rows.map(r => ({
-        id: r.id,
-        userId: r.user_id,
-        username: r.username,
-        phone: r.phone,
-        productId: r.product_id,
-        productTitle: r.product_title,
-        productImage: r.product_image,
-        productLink: r.product_link,
-        question: r.question,
-        questionAudio: r.question_audio || null,
-        reply: r.reply,
-        replyAudio: r.reply_audio || null,
-        status: r.status,
-        createdAt: r.created_at,
-        repliedAt: r.replied_at
-      }));
+      return res.rows.map(formatMessageRow);
     } catch (err) {
       console.error('Erro getMessages Postgres:', err);
     }
   }
 
   // Fallback JSON
-  const messages = readJson(MESSAGES_FILE, []);
+  const messages = readJson(MESSAGES_FILE, []).map(m => {
+    if (!m.history || !Array.isArray(m.history) || m.history.length === 0) {
+      const hist = [];
+      if (m.question || m.questionAudio) {
+        hist.push({
+          id: 'msg_q_' + m.id,
+          sender: 'client',
+          text: m.question || '',
+          audio: m.questionAudio || null,
+          createdAt: m.createdAt
+        });
+      }
+      if (m.reply || m.replyAudio) {
+        hist.push({
+          id: 'msg_r_' + m.id,
+          sender: 'admin',
+          text: m.reply || '',
+          audio: m.replyAudio || null,
+          createdAt: m.repliedAt || m.createdAt
+        });
+      }
+      m.history = hist;
+    }
+    return m;
+  });
+
   if (userId) {
     return messages.filter(m => m.userId === userId);
   }
@@ -198,11 +258,21 @@ async function getMessages(userId = null) {
 }
 
 async function addMessage(msg) {
+  if (!msg.history || !Array.isArray(msg.history) || msg.history.length === 0) {
+    msg.history = [{
+      id: 'sub_' + crypto.randomUUID().slice(0, 8),
+      sender: 'client',
+      text: msg.question || '',
+      audio: msg.questionAudio || null,
+      createdAt: msg.createdAt
+    }];
+  }
+
   if (usePostgres) {
     try {
       await pool.query(
-        `INSERT INTO app_messages (id, user_id, username, phone, product_id, product_title, product_image, product_link, question, question_audio, reply, reply_audio, status, created_at, replied_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        `INSERT INTO app_messages (id, user_id, username, phone, product_id, product_title, product_image, product_link, question, question_audio, reply, reply_audio, status, history, created_at, replied_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
         [
           msg.id,
           msg.userId,
@@ -217,6 +287,7 @@ async function addMessage(msg) {
           msg.reply || null,
           msg.replyAudio || null,
           msg.status || 'pending',
+          JSON.stringify(msg.history),
           msg.createdAt,
           msg.repliedAt || null
         ]
@@ -233,32 +304,37 @@ async function addMessage(msg) {
 }
 
 async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {
+  let existing = null;
+  if (usePostgres) {
+    try {
+      const check = await pool.query('SELECT * FROM app_messages WHERE id = $1', [id]);
+      if (check.rows.length > 0) existing = formatMessageRow(check.rows[0]);
+    } catch (e) {}
+  } else {
+    const list = readJson(MESSAGES_FILE, []);
+    existing = list.find(m => m.id === id);
+  }
+
+  const history = existing ? [...(existing.history || [])] : [];
+  history.push({
+    id: 'sub_' + crypto.randomUUID().slice(0, 8),
+    sender: 'admin',
+    text: reply || '',
+    audio: replyAudio || null,
+    createdAt: repliedAt
+  });
+
   let updatedMsg = null;
   if (usePostgres) {
     try {
       const res = await pool.query(
-        `UPDATE app_messages SET reply = $1, reply_audio = $2, status = 'answered', replied_at = $3 WHERE id = $4 RETURNING *`,
-        [reply, replyAudio, repliedAt, id]
+        `UPDATE app_messages 
+         SET reply = $1, reply_audio = $2, status = 'answered', replied_at = $3, history = $4 
+         WHERE id = $5 RETURNING *`,
+        [reply, replyAudio, repliedAt, JSON.stringify(history), id]
       );
       if (res.rows.length > 0) {
-        const r = res.rows[0];
-        updatedMsg = {
-          id: r.id,
-          userId: r.user_id,
-          username: r.username,
-          phone: r.phone,
-          productId: r.product_id,
-          productTitle: r.product_title,
-          productImage: r.product_image,
-          productLink: r.product_link,
-          question: r.question,
-          questionAudio: r.question_audio || null,
-          reply: r.reply,
-          replyAudio: r.reply_audio || null,
-          status: r.status,
-          createdAt: r.created_at,
-          repliedAt: r.replied_at
-        };
+        updatedMsg = formatMessageRow(res.rows[0]);
       }
     } catch (err) {
       console.error('Erro updateMessageReply Postgres:', err);
@@ -272,10 +348,64 @@ async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {
     messages[index].replyAudio = replyAudio || null;
     messages[index].status = 'answered';
     messages[index].repliedAt = repliedAt;
+    messages[index].history = history;
     writeJson(MESSAGES_FILE, messages);
     if (!updatedMsg) updatedMsg = messages[index];
   }
+  return updatedMsg;
+}
 
+// Cliente envia réplica/resposta na conversa existente (chat contínuo)
+async function addCustomerReply(id, text, audio = null, createdAt) {
+  let existing = null;
+  if (usePostgres) {
+    try {
+      const check = await pool.query('SELECT * FROM app_messages WHERE id = $1', [id]);
+      if (check.rows.length > 0) existing = formatMessageRow(check.rows[0]);
+    } catch (e) {}
+  } else {
+    const list = readJson(MESSAGES_FILE, []);
+    existing = list.find(m => m.id === id);
+  }
+
+  if (!existing) return null;
+
+  const history = [...(existing.history || [])];
+  history.push({
+    id: 'sub_' + crypto.randomUUID().slice(0, 8),
+    sender: 'client',
+    text: text || '',
+    audio: audio || null,
+    createdAt: createdAt
+  });
+
+  let updatedMsg = null;
+  if (usePostgres) {
+    try {
+      const res = await pool.query(
+        `UPDATE app_messages 
+         SET question = $1, question_audio = $2, status = 'pending', history = $3 
+         WHERE id = $4 RETURNING *`,
+        [text || existing.question, audio || existing.questionAudio, JSON.stringify(history), id]
+      );
+      if (res.rows.length > 0) {
+        updatedMsg = formatMessageRow(res.rows[0]);
+      }
+    } catch (err) {
+      console.error('Erro addCustomerReply Postgres:', err);
+    }
+  }
+
+  const messages = readJson(MESSAGES_FILE, []);
+  const index = messages.findIndex(m => m.id === id);
+  if (index !== -1) {
+    messages[index].question = text || messages[index].question;
+    messages[index].questionAudio = audio || messages[index].questionAudio;
+    messages[index].status = 'pending';
+    messages[index].history = history;
+    writeJson(MESSAGES_FILE, messages);
+    if (!updatedMsg) updatedMsg = messages[index];
+  }
   return updatedMsg;
 }
 
@@ -437,6 +567,7 @@ module.exports = {
   getMessages,
   addMessage,
   updateMessageReply,
+  addCustomerReply,
   deleteMessage,
   getUserByUsername,
   createUser,

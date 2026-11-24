@@ -538,6 +538,52 @@ app.post('/api/user/messages', async (req, res) => {
   res.status(201).json({ success: true, message: newMsg });
 });
 
+// Cliente envia réplica/continuação na conversa existente (chat contínuo)
+app.post('/api/user/reply/:id', async (req, res) => {
+  const { id } = req.params;
+  const { userId, reply, replyAudio } = req.body;
+
+  if (!userId || ((!reply || !reply.trim()) && !replyAudio)) {
+    return res.status(400).json({ error: 'Mensagem ou áudio é obrigatório.' });
+  }
+
+  const now = new Date().toISOString();
+  const textContent = (reply && reply.trim()) || '🎤 [Dúvida/Áudio do Cliente]';
+  const updatedMsg = await db.addCustomerReply(id, textContent, replyAudio || null, now);
+
+  if (!updatedMsg) {
+    return res.status(404).json({ error: 'Conversa não encontrada.' });
+  }
+
+  // Avisa painel do admin em tempo real via Socket
+  io.to('admin-room').emit('admin:message_updated', updatedMsg);
+  io.to('admin-room').emit('admin:new_question', updatedMsg);
+
+  // Robô avisa o Dono no Telegram na hora
+  try {
+    await notifyOwnerViaTelegram({
+      id: updatedMsg.id,
+      username: updatedMsg.username,
+      phone: updatedMsg.phone,
+      productTitle: updatedMsg.productTitle,
+      question: textContent,
+      questionAudio: replyAudio || null
+    });
+  } catch (tgErr) {
+    console.error('Erro ao notificar Telegram da réplica:', tgErr.message);
+  }
+
+  // Alerta push para aparelhos do admin
+  sendPushNotificationToUser('admin', {
+    title: 'Sua Promo 💬 Nova Mensagem do Cliente!',
+    body: `${updatedMsg.username}: "${textContent.substring(0, 50)}"`,
+    icon: '/icons/icon-192.png',
+    url: '/admin.html'
+  });
+
+  res.json({ success: true, message: updatedMsg });
+});
+
 // --- WEBHOOK PARA COMANDOS NO BOT DO TELEGRAM ---
 app.post('/api/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
@@ -655,14 +701,10 @@ app.post('/api/admin/reply/:id', requireAdmin, async (req, res) => {
   io.to(`user_${updatedMsg.userId}`).emit('user:message_answered', updatedMsg);
   io.to('admin-room').emit('admin:message_updated', updatedMsg);
 
-  // Notifica via Web Push para TODOS os celulares cadastrados (mesmo site fechado)
-  const pushBody = replyAudio
-    ? 'Temos uma resposta em áudio para você! Toque para ouvir.'
-    : 'Temos uma promoção para você! Toque para conferir.';
-
+  // Notifica via Web Push para TODOS os celulares cadastrados (Padrão exato fixo)
   await broadcastPushNotification({
     title: 'Sua Promo 🔥',
-    body: pushBody,
+    body: 'Temos uma promoção para você! Toque para conferir.',
     icon: '/icons/icon-192.png',
     url: '/'
   });

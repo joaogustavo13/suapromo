@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sua Promo - As Melhores Ofertas e Promoções da Internet</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+  <!-- Top Announcement Bar -->
+  <div class="top-bar">
+    <div class="container top-bar-content">
+      <div class="top-announcement">
+        <span class="fire-icon">🔥</span>
+        <span><strong>Sua Promo:</strong> Ofertas reais monitoradas no piloto automático com até 70% de desconto</span>
+      </div>
+      <div class="top-bar-links">
+        <a href="/admin.html" target="_blank" class="admin-link-top">Painel de Atendimento (Admin) ➜</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header Estilo Promobit -->
+  <header class="header">
+    <div class="container header-container">
+      <!-- Logo Sua Promo -->
+      <a href="/" class="logo-area">
+        <div class="logo-icon-wrap">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 23c-4.97 0-9-4.03-9-9 0-4.12 2.77-7.6 6.64-8.67.43-.12.87.16.94.6.03.18 0 .37-.09.52C9.52 7.9 9 9.39 9 11c0 2.21 1.79 4 4 4s4-1.79 4-4c0-2.45-1.2-4.63-3.08-5.96-.36-.26-.45-.76-.2-1.12.1-.15.25-.26.42-.32C17.65 2.12 21 5.67 21 10c0 7.18-4.03 13-9 13z"></path>
+          </svg>
+        </div>
+        <div class="logo-text-group">
+          <span class="logo-title">Sua <span>Promo</span></span>
+          <span class="logo-sub">Comunidade de Ofertas</span>
+        </div>
+      </a>
+
+      <!-- Search Bar -->
+      <div class="search-box">
+        <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="search-input" placeholder="O que você está procurando hoje? (ex: notebook, tv, airfryer...)">
+        <button id="search-clear" class="search-clear" style="display: none;">&times;</button>
+      </div>
+
+      <!-- Área de Login / Usuário -->
+      <div class="header-user-area" id="header-user-area">
+        <!-- Injetado via client-messages.js -->
+      </div>
+    </div>
+  </header>
+
+  <!-- Categories Bar Estilo Promobit -->
+  <nav class="categories-nav">
+    <div class="container categories-container" id="categories-list">
+      <button class="cat-pill active" data-category="Todos">🔥 Mais Quentes</button>
+      <button class="cat-pill" data-category="Informática & Gamer">💻 Informática & Gamer</button>
+      <button class="cat-pill" data-category="Áudio & Vídeo">🎧 Áudio & Vídeo</button>
+      <button class="cat-pill" data-category="Casa & Cozinha">🍳 Casa & Cozinha</button>
+      <button class="cat-pill" data-category="Games">🎮 Games</button>
+      <button class="cat-pill" data-category="Segurança & Casa">🔒 Casa & Segurança</button>
+      <button class="cat-pill" data-category="Eletrônicos & Outros">⚡ Outros</button>
+    </div>
+  </nav>
+
+  <!-- Hero Banner Promobit Style -->
+  <section class="hero-section">
+    <div class="container">
+      <div class="hero-card">
+        <div class="hero-text">
+          <div class="hero-badge-wrap">
+            <span class="hero-pill-badge">🚀 RADAR DE OFERTAS 24H</span>
+            <span class="hero-pill-hot">🔥 ATÉ 65% OFF</span>
+          </div>
+          <h2>As Melhores Promoções com Desconto Real da Internet</h2>
+          <p>Nosso robô monitora e seleciona automaticamente as ofertas mais quentes e com menor preço histórico. Dúvidas sobre qualquer item? Faça login com seu usuário e tire suas dúvidas!</p>
+          <div class="hero-stats">
+            <div class="stat-item">
+              <strong id="deals-count-stat">37</strong>
+              <span>Promoções Ativas</span>
+            </div>
+            <div class="stat-item">
+              <strong>Verificadas</strong>
+              <span>Preços Reais</span>
+            </div>
+            <div class="stat-item">
+              <strong>Mercado Livre</strong>
+              <span>Compre com Segurança</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Products Section -->
+  <main class="container products-section">
+    <div class="section-header">
+      <div class="section-title-wrap">
+        <h3 class="section-title">Últimas Promoções Adicionadas</h3>
+        <p class="section-desc" id="products-count">Carregando promoções...</p>
+      </div>
+      <div class="filter-controls">
+        <label for="sort-select" class="sort-label">Ordenar:</label>
+        <select id="sort-select" class="sort-select">
+          <option value="discount">Maior Desconto (%)</option>
+          <option value="price-asc">Menor Preço (R$)</option>
+          <option value="price-desc">Maior Preço (R$)</option>
+          <option value="featured">Destaques</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Product Grid Estilo Promobit -->
+    <div class="products-grid" id="products-grid">
+      <!-- Injetado via app.js -->
+    </div>
+  </main>
+
+  <!-- Footer Promobit Style -->
+  <footer class="footer">
+    <div class="container footer-content">
+      <div class="footer-logo">
+        <span class="logo-title">Sua <span>Promo</span></span>
+      </div>
+      <p>© 2026 Sua Promo. Sua central de ofertas, cupons e achadinhos da internet.</p>
+      <p class="footer-note">Participamos do programa oficial de afiliados. Ao comprar pelos nossos links, você apoia o projeto sem pagar nenhum valor a mais.</p>
+    </div>
+  </footer>
+
+  <!-- ======================================================== -->
+  <!-- MODAL DE LOGIN / CADASTRO (NOME + SENHA SIMPLES) -->
+  <!-- ======================================================== -->
+  <div id="auth-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card auth-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-tag">🔐 ENTRAR OU CRIAR CONTA</span>
+          <h3>Acesse sua Conta no Sua Promo</h3>
+        </div>
+        <button class="modal-close-btn" onclick="closeAuthModal()">&times;</button>
+      </div>
+
+      <p class="auth-hint">Basta digitar seu <strong>Nome de Usuário</strong> e uma <strong>Senha</strong>. Se você ainda não tem conta, ela é criada na hora!</p>
+
+      <form id="auth-form" onsubmit="handleAuthSubmit(event)">
+        <div class="form-group">
+          <label for="auth-username">Nome de Usuário *</label>
+          <input type="text" id="auth-username" required placeholder="Ex: carlos, joao, maria..." autocomplete="username">
+        </div>
+
+        <div class="form-group">
+          <label for="auth-password">Senha *</label>
+          <input type="password" id="auth-password" required placeholder="Digite sua senha" autocomplete="current-password">
+        </div>
+
+        <div id="auth-error-msg" class="auth-error" style="display: none;"></div>
+
+        <button type="submit" class="btn-submit-question" id="auth-submit-btn">
+          Entrar / Criar Conta ➜
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL DE ENVIO DE DÚVIDA SOBRE O PRODUTO -->
+  <!-- ======================================================== -->
+  <div id="ask-modal-overlay" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-tag">💬 TIRAR DÚVIDA</span>
+          <h3>Fazer Pergunta sobre a Promoção</h3>
+        </div>
+        <button class="modal-close-btn" onclick="closeAskModal()">&times;</button>
+      </div>
+
+      <div class="modal-product-summary">
+        <img src="" id="modal-prod-img" class="summary-thumb" alt="Produto">
+        <div class="summary-details">
+          <span class="summary-store-tag">Mercado Livre</span>
+          <h4 id="modal-prod-title">Título do Produto</h4>
+          <span id="modal-prod-price" class="summary-price">R$ 0,00</span>
+        </div>
+      </div>
+
+      <form id="ask-form" onsubmit="submitProductQuestion(event)">
+        <input type="hidden" id="ask-prod-id">
+        <input type="hidden" id="ask-prod-title">
+        <input type="hidden" id="ask-prod-image">
+        <input type="hidden" id="ask-prod-link">
+
+        <div class="form-group">
+          <label>Você está logado como: <strong id="logged-user-display" class="user-highlight">Usuário</strong></label>
+        </div>
+
+        <div class="form-group">
+          <label for="client-question">Sua Dúvida sobre essa oferta *</label>
+          <textarea id="client-question" rows="3" required placeholder="Ex: Essa voltagem é 110v ou 220v? Como funciona o frete?"></textarea>
+          <small class="helper-text">💡 O atendente responderá e você verá a resposta em "Minhas Mensagens" quando entrar com seu usuário e senha.</small>
+        </div>
+
+        <button type="submit" class="btn-submit-question" id="btn-submit-question">
+          Enviar Dúvida ao Vendedor 🚀
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- GAVETA LATERAL: MINHAS MENSAGENS -->
+  <!-- ======================================================== -->
+  <div id="messages-drawer" class="messages-drawer">
+    <div class="drawer-header">
+      <div class="drawer-header-left">
+        <div class="drawer-icon">📬</div>
+        <div>
+          <h4>Minhas Mensagens</h4>
+          <span id="drawer-user-info" class="drawer-user-sub">Suas dúvidas e respostas</span>
+        </div>
+      </div>
+      <button class="drawer-close-btn" onclick="closeMessagesCenter()">&times;</button>
+    </div>
+
+    <div class="drawer-content" id="drawer-tickets-list">
+      <!-- Injetado via client-messages.js -->
+    </div>
+  </div>
+
+  <!-- Botão Flutuante de Minhas Mensagens -->
+  <div class="floating-inbox-btn" onclick="openMessagesCenter()" title="Minhas Mensagens">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+      <polyline points="22,6 12,13 2,6"></polyline>
+    </svg>
+    <span class="floating-badge" id="floating-unread-badge" style="display: none;">0</span>
+  </div>
+
+  <script src="/js/app.js"></script>
+  <script src="/js/client-messages.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "tkt-a8ff2f4d",
+    "clientId": "cli-test1",
+    "clientName": "Marcos Oliveira",
+    "clientPhone": "11988887777",
+    "clientEmail": "",
+    "status": "replied",
+    "productId": "MLB3149432741",
+    "productTitle": "Suporte Para Cpu Nobreak Gabinete Estabilizador Com Rodinhas",
+    "productImage": "https://http2.mlstatic.com/D_NQ_NP_984629-MLB76713715675_052024-O.webp",
+    "productLink": "https://produto.mercadolivre.com.br/MLB-3149432741-suporte-para-cpu-nobreak-gabinete-estabilizador-com-rodinhas-_JM?matt_tool=joaogustavo_13&forceInApp=true",
+    "createdAt": "2026-11-24T03:59:17.523Z",
+    "lastUpdate": "2026-11-24T03:59:22.790Z",
+    "messages": [
+      {
+        "id": "msg-1",
+        "sender": "client",
+        "senderName": "Marcos Oliveira",
+        "text": "Boa noite! Esse suporte para gabinete aguenta CPU pesada de 15kg?",
+        "timestamp": "2026-11-24T03:59:17.523Z"
+      },
+      {
+        "id": "msg-17be381a",
+        "sender": "admin",
+        "senderName": "João Gustavo | Atendimento",
+        "text": "Olá Marcos! Suporta tranquilamente até 25kg, as rodinhas são reforçadas com trava e tem frete Full!",
+        "timestamp": "2026-11-24T03:59:22.790Z"
+      }
+    ]
+  }
+]

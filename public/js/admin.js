@@ -305,6 +305,23 @@ function selectAdminMessage(msgId) {
   document.getElementById('active-msg-status').textContent = isPending ? '🟡 Aguardando sua resposta' : '🟢 Respondido';
   document.getElementById('active-msg-status').style.color = isPending ? '#d97706' : '#15803d';
 
+  // Exibe WhatsApp se informado pelo cliente
+  const waContainer = document.getElementById('active-user-whatsapp');
+  if (waContainer) {
+    if (msg.phone) {
+      const cleanPhone = msg.phone.replace(/\D/g, '');
+      const replyMsg = encodeURIComponent(`Olá ${msg.username}! Sobre sua dúvida na oferta do Mercado Livre (${msg.productTitle || 'Promoção'}): `);
+      waContainer.innerHTML = `
+        <a href="https://wa.me/55${cleanPhone}?text=${replyMsg}" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; background: #22c55e; color: #fff; text-decoration: none; padding: 4px 10px; border-radius: 14px; font-size: 0.75rem; font-weight: 700; transition: opacity 0.2s;">
+          <span>💬 WhatsApp: ${escapeHtml(msg.phone)} (Responder no Zap ↗)</span>
+        </a>
+      `;
+      waContainer.style.display = 'block';
+    } else {
+      waContainer.style.display = 'none';
+    }
+  }
+
   // Card do Produto
   const prodBanner = document.getElementById('active-prod-banner');
   if (msg.productTitle) {

@@ -189,6 +189,7 @@ async function submitProductQuestion(e) {
   }
 
   const question = document.getElementById('client-question').value.trim();
+  const phone = document.getElementById('client-phone') ? document.getElementById('client-phone').value.trim() : '';
   const prodId = document.getElementById('ask-prod-id').value;
   const prodTitle = document.getElementById('ask-prod-title').value;
   const prodImg = document.getElementById('ask-prod-image').value;
@@ -211,15 +212,22 @@ async function submitProductQuestion(e) {
         productTitle: prodTitle,
         productImage: prodImg,
         productLink: prodLink,
+        phone,
         question
       })
     });
 
     if (res.ok) {
       closeAskModal();
-      showToast('✅ Pergunta enviada ao vendedor! Acompanhe em "Minhas Mensagens".');
-      openMessagesCenter();
-      loadUserMessages();
+      showToast('✅ Dúvida enviada com sucesso!');
+
+      // Se ainda não ativou notificações e o navegador suporta, convida para ativar
+      if (('Notification' in window && Notification.permission === 'default') || isIOSDevice()) {
+        setTimeout(() => openPushPromptModal(), 350);
+      } else {
+        openMessagesCenter();
+        loadUserMessages();
+      }
     } else {
       showToast('Erro ao enviar pergunta.');
     }
@@ -227,7 +235,7 @@ async function submitProductQuestion(e) {
     showToast('Erro de conexão ao enviar.');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Enviar Pergunta ao Vendedor 🚀';
+    btn.textContent = 'Enviar Dúvida ao Vendedor 🚀';
   }
 }
 
@@ -375,12 +383,52 @@ async function registerServiceWorker() {
   }
 }
 
+function isIOSDevice() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function openPushPromptModal() {
+  const modal = document.getElementById('push-prompt-modal');
+  if (!modal) return;
+  const iosBox = document.getElementById('ios-instruction-box');
+  const btn = document.getElementById('btn-activate-push');
+
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+  if (isIOSDevice() && !isStandalone) {
+    if (iosBox) iosBox.style.display = 'block';
+    if (btn) btn.textContent = '📲 Entendi como adicionar ao iPhone';
+  } else {
+    if (iosBox) iosBox.style.display = 'none';
+    if (btn) btn.textContent = '🔔 Sim, Ativar Notificações no Celular';
+  }
+
+  modal.style.display = 'flex';
+}
+
+function closePushPromptModal() {
+  const modal = document.getElementById('push-prompt-modal');
+  if (modal) modal.style.display = 'none';
+  openMessagesCenter();
+  loadUserMessages();
+}
+
+function triggerNotificationPrompt() {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isIOSDevice() && !isStandalone) {
+    closePushPromptModal();
+    return;
+  }
+  closePushPromptModal();
+  requestWebNotificationPermission();
+}
+
 async function subscribeUserToPush() {
   if (!currentUser) return;
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
   try {
-    const reg = swRegistration || (await registerServiceWorker());
+    const reg = await navigator.serviceWorker.ready;
     if (!reg) return;
 
     const res = await fetch('/api/push-public-key');
@@ -395,7 +443,7 @@ async function subscribeUserToPush() {
       });
     }
 
-    await fetch('/api/user/push-subscription', {
+    const saveRes = await fetch('/api/user/push-subscription', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -403,7 +451,9 @@ async function subscribeUserToPush() {
         subscription: sub
       })
     });
-    console.log('✅ Dispositivo inscrito com sucesso para Web Push:', currentUser.username);
+    if (saveRes.ok) {
+      console.log('✅ Inscrição Web Push salva no servidor com sucesso para:', currentUser.username);
+    }
   } catch (err) {
     console.warn('Erro ao registrar inscrição WebPush:', err);
   }

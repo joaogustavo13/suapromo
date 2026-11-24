@@ -65,15 +65,17 @@ if (initialSettings.vapidPublicKey && initialSettings.vapidPrivateKey) {
 async function sendPushNotificationToUser(userId, payload) {
   const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
   const userSubs = subscriptions[userId] || [];
+  console.log(`[WebPush] Disparando push para userId ${userId}. Dispositivos registrados: ${userSubs.length}`);
   if (userSubs.length === 0) return;
 
   const validSubs = [];
   for (const sub of userSubs) {
     try {
       await webpush.sendNotification(sub, JSON.stringify(payload));
+      console.log(`[WebPush] ✅ Push entregue com sucesso: ${sub.endpoint.substring(0, 40)}...`);
       validSubs.push(sub);
     } catch (err) {
-      console.warn(`[WebPush] Aviso envio para ${userId}:`, err.statusCode || err.message);
+      console.warn(`[WebPush] ❌ Erro envio para ${userId}:`, err.statusCode || err.message);
       // Se 410 (Gone) ou 404 (Not Found), a inscrição foi revogada no dispositivo
       if (err.statusCode !== 410 && err.statusCode !== 404) {
         validSubs.push(sub);
@@ -250,7 +252,7 @@ app.get('/api/user/messages', (req, res) => {
 
 // Usuário envia uma dúvida sobre um produto
 app.post('/api/user/messages', (req, res) => {
-  const { userId, username, productId, productTitle, productImage, productLink, question } = req.body;
+  const { userId, username, productId, productTitle, productImage, productLink, phone, question } = req.body;
 
   if (!userId || !question || !question.trim()) {
     return res.status(400).json({ error: 'Usuário e pergunta são obrigatórios.' });
@@ -263,6 +265,7 @@ app.post('/api/user/messages', (req, res) => {
     id: 'msg_' + crypto.randomUUID().slice(0, 8),
     userId,
     username: username || 'Usuário',
+    phone: phone ? phone.trim() : null,
     productId: productId || null,
     productTitle: productTitle || null,
     productImage: productImage || null,
@@ -354,9 +357,21 @@ app.post('/api/user/push-subscription', (req, res) => {
   if (!exists) {
     subscriptions[userId].push(subscription);
     writeJson(SUBSCRIPTIONS_FILE, subscriptions);
+    console.log(`[WebPush] ✅ Dispositivo registrado para ${userId}. Total: ${subscriptions[userId].length}`);
   }
 
   res.json({ success: true });
+});
+
+// Rota de status para ver quantos celulares/computadores estão inscritos
+app.get('/api/admin/push-stats', requireAdmin, (req, res) => {
+  const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
+  const userCount = Object.keys(subscriptions).length;
+  let totalDevices = 0;
+  for (const uid in subscriptions) {
+    totalDevices += (subscriptions[uid] || []).length;
+  }
+  res.json({ userCount, totalDevices, subscriptions });
 });
 
 // Exclui mensagem

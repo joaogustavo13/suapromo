@@ -4,6 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sua Promo - As Melhores Ofertas e Promoções da Internet</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Sua Promo">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="stylesheet" href="/css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -206,10 +212,48 @@
           <small class="helper-text">💡 O atendente responderá e você verá a resposta em "Minhas Mensagens" quando entrar com seu usuário e senha.</small>
         </div>
 
+        <div class="form-group">
+          <label for="client-phone">WhatsApp para resposta no bolso (Opcional):</label>
+          <input type="tel" id="client-phone" placeholder="Ex: (11) 99999-9999" autocomplete="tel">
+          <small class="helper-text">📱 Opcional: Se preencher, o vendedor pode te avisar direto no WhatsApp quando responder!</small>
+        </div>
+
         <button type="submit" class="btn-submit-question" id="btn-submit-question">
           Enviar Dúvida ao Vendedor 🚀
         </button>
       </form>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL DE ATIVAÇÃO DE NOTIFICAÇÃO NO CELULAR -->
+  <!-- ======================================================== -->
+  <div id="push-prompt-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 440px; text-align: center;">
+      <div style="font-size: 2.8rem; margin-bottom: 12px;">🔔</div>
+      <h3 style="font-size: 1.3rem; font-weight: 900; margin-bottom: 10px; color: var(--brand-purple-deep);">
+        Quer ser avisado no seu celular?
+      </h3>
+      <p style="font-size: 0.92rem; color: #475569; margin-bottom: 20px; line-height: 1.5;">
+        Ative as notificações para receber o aviso na tela do seu celular assim que o vendedor responder sua dúvida, <strong>mesmo com o site fechado</strong>!
+      </p>
+
+      <!-- Instrução especial para iPhone / iOS -->
+      <div id="ios-instruction-box" style="display: none; background: #f5f3ff; border: 1px solid #c7d2fe; border-radius: 10px; padding: 14px; margin-bottom: 18px; text-align: left; font-size: 0.85rem; color: #3730a3;">
+        <strong>📲 Usuário de iPhone (iOS):</strong><br>
+        1. No Safari, toque no ícone de <strong>Compartilhar</strong> (quadradinho com a seta pra cima).<br>
+        2. Selecione <strong>"Adicionar à Tela de Início"</strong>.<br>
+        3. Abra o app pelo ícone que surgiu na tela do celular para receber os avisos na tela de bloqueio!
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <button type="button" class="btn-submit-question" id="btn-activate-push" onclick="triggerNotificationPrompt()" style="margin: 0; padding: 14px; font-size: 0.95rem;">
+          🔔 Sim, Ativar Notificações no Celular
+        </button>
+        <button type="button" class="btn-deal" onclick="closePushPromptModal()" style="background: transparent; color: #64748b; border: 1px solid #cbd5e1; margin: 0; padding: 10px; font-size: 0.88rem;">
+          Agora não / Ver minhas mensagens
+        </button>
+      </div>
     </div>
   </div>
 

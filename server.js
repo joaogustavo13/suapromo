@@ -96,7 +96,8 @@ async function broadcastPushNotification(payload) {
   const allSubs = [];
 
   for (const key in subscriptions) {
-    const list = subscriptions[key] || [];
+    const raw = subscriptions[key];
+    const list = Array.isArray(raw) ? raw : [raw];
     for (const sub of list) {
       if (sub && sub.endpoint && !allEndpoints.has(sub.endpoint)) {
         allEndpoints.add(sub.endpoint);
@@ -118,7 +119,11 @@ async function broadcastPushNotification(payload) {
       console.warn(`[WebPush Broadcast] ❌ Erro em dispositivo:`, err.statusCode || err.message);
       if (err.statusCode === 410 || err.statusCode === 404) {
         if (subscriptions[item.key]) {
-          subscriptions[item.key] = subscriptions[item.key].filter(s => s.endpoint !== item.sub.endpoint);
+          if (Array.isArray(subscriptions[item.key])) {
+            subscriptions[item.key] = subscriptions[item.key].filter(s => s.endpoint !== item.sub.endpoint);
+          } else {
+            delete subscriptions[item.key];
+          }
         }
       }
     }
@@ -336,7 +341,7 @@ app.get('/api/admin/messages', requireAdmin, (req, res) => {
 });
 
 // Dono responde à dúvida
-app.post('/api/admin/reply/:id', requireAdmin, (req, res) => {
+app.post('/api/admin/reply/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { reply } = req.body;
 
@@ -363,7 +368,7 @@ app.post('/api/admin/reply/:id', requireAdmin, (req, res) => {
   io.to('admin-room').emit('admin:message_updated', messages[index]);
 
   // Notifica via Web Push para TODOS os celulares cadastrados (mesmo site fechado)
-  broadcastPushNotification({
+  await broadcastPushNotification({
     title: 'Sua Promo 🔥',
     body: 'Temos uma promoção para você! Toque para conferir.',
     icon: '/icons/icon-192.png',

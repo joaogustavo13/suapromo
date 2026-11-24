@@ -9,9 +9,9 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('push', (event) => {
   let data = {
-    title: 'Sua Promo • Resposta do Vendedor',
-    body: 'O vendedor respondeu sua dúvida sobre a oferta!',
-    icon: 'https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.22/mercadolibre/180x180.png',
+    title: 'Sua Promo 🔥',
+    body: 'Temos uma promoção para você! Toque para conferir.',
+    icon: '/icons/icon-192.png',
     url: '/'
   };
 

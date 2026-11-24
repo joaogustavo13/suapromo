@@ -33,7 +33,7 @@ function initUserSocket() {
     }
   });
 
-  // Recebe notificação quando o vendedor responde
+  // Recebe notificação quando há resposta
   socket.on('user:message_answered', (msg) => {
     playNotificationSound();
     loadUserMessages();
@@ -42,7 +42,7 @@ function initUserSocket() {
     triggerBrowserWebNotification(msg);
 
     // 2. Notificação visual Toast no site
-    showToast(`🔔 O vendedor respondeu sua dúvida sobre "${msg.productTitle || 'Produto'}"!`);
+    showToast('🔥 Temos uma promoção para você! Veja em Minhas Mensagens.');
   });
 }
 
@@ -278,8 +278,8 @@ function renderUserMessagesList() {
   container.innerHTML = pushBanner + userMessages.map(m => {
     const isAnswered = m.status === 'answered' && m.reply;
     const statusBadge = isAnswered
-      ? `<span class="ticket-status-replied">🟢 Respondido pelo vendedor</span>`
-      : `<span class="ticket-status-pending">🟡 Aguardando resposta</span>`;
+      ? `<span class="ticket-status-replied">🟢 Respondido</span>`
+      : `<span class="ticket-status-pending">🟡 Em análise</span>`;
 
     const qTime = m.createdAt ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const rTime = m.repliedAt ? new Date(m.repliedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -306,13 +306,13 @@ function renderUserMessagesList() {
 
           ${isAnswered ? `
             <div class="ticket-bubble bubble-admin">
-              <div class="bubble-sender">Vendedor (Atendimento)</div>
+              <div class="bubble-sender">Equipe Sua Promo</div>
               <div class="bubble-text">${escapeHtml(m.reply)}</div>
               <span class="bubble-time">${rTime}</span>
             </div>
           ` : `
             <div class="pending-notice">
-              O vendedor responderá em breve. Você pode fechar o site e ver a resposta quando logar novamente!
+              Nossa equipe responderá em breve. Você pode fechar o site e ver os detalhes quando logar novamente!
             </div>
           `}
         </div>
@@ -512,15 +512,15 @@ function triggerBrowserWebNotification(msg) {
   if ('Notification' in window && Notification.permission === 'granted') {
     try {
       if (swRegistration && swRegistration.showNotification) {
-        swRegistration.showNotification('Sua Promo • Resposta do Vendedor', {
-          body: `${msg.productTitle ? msg.productTitle + ': ' : ''}${msg.reply}`,
-          icon: msg.productImage || 'https://http2.mlstatic.com/frontend-assets/ml-web-navigation/ui-navigation/5.21.22/mercadolibre/180x180.png',
+        swRegistration.showNotification('Sua Promo 🔥', {
+          body: 'Temos uma promoção para você! Toque para conferir.',
+          icon: '/icons/icon-192.png',
           data: { url: '/' }
         });
       } else {
-        new Notification('Sua Promo • Resposta do Vendedor', {
-          body: `${msg.productTitle ? msg.productTitle + ': ' : ''}${msg.reply}`,
-          icon: msg.productImage || '/favicon.ico'
+        new Notification('Sua Promo 🔥', {
+          body: 'Temos uma promoção para você! Toque para conferir.',
+          icon: '/icons/icon-192.png'
         });
       }
     } catch (e) {}

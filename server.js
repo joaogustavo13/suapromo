@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const fs = require('fs');
@@ -138,41 +139,76 @@ async function notifyOwnerViaTelegram(msg) {
   const chatId = process.env.TELEGRAM_CHAT_ID || settings.telegramChatId;
 
   if (!token || !chatId) {
+    console.warn('🤖 [Telegram Bot] Token ou Chat ID não configurados.');
     return false;
   }
 
-  const phoneInfo = msg.phone ? `\n📱 *WhatsApp do Cliente:* ${msg.phone}` : '';
-  const prodInfo = msg.productTitle ? `\n🏷️ *Oferta:* ${msg.productTitle}` : '';
+  const phoneInfo = msg.phone ? `\n📱 WhatsApp do Cliente: ${msg.phone}` : '';
+  const prodInfo = msg.productTitle ? `\n🏷️ Oferta: ${msg.productTitle}` : '';
 
-  const text = `🔥 *NOVA DÚVIDA RECEBIDA NO SUA PROMO!*\n\n` +
-    `👤 *Cliente:* ${msg.username}${phoneInfo}${prodInfo}\n` +
-    `💬 *Dúvida:* "${msg.question}"\n\n` +
+  const text = `🔥 NOVA DÚVIDA RECEBIDA NO SUA PROMO!\n\n` +
+    `👤 Cliente: ${msg.username}${phoneInfo}${prodInfo}\n` +
+    `💬 Dúvida: "${msg.question}"\n\n` +
     `👉 Responda no painel: https://suapromo.onrender.com/admin.html`;
 
-  try {
-    const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
+  return new Promise((resolve) => {
+    try {
+      const payload = JSON.stringify({
+        chat_id: String(chatId).trim(),
         text,
-        parse_mode: 'Markdown',
         disable_web_page_preview: true
-      })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      console.log('🤖 [Telegram Bot] ✅ Dono avisado com sucesso no Telegram!');
-      return true;
-    } else {
-      console.warn('🤖 [Telegram Bot] ❌ Erro do Telegram:', data.description);
-      return false;
+      });
+
+      const options = {
+        hostname: 'api.telegram.org',
+        port: 443,
+        path: `/bot${String(token).trim()}/sendMessage`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        },
+        timeout: 10000
+      };
+
+      const req = https.request(options, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            if (data.ok) {
+              console.log('🤖 [Telegram Bot] ✅ Dono avisado com sucesso no Telegram!');
+              resolve(true);
+            } else {
+              console.warn('🤖 [Telegram Bot] ❌ Erro do Telegram:', data.description);
+              resolve(false);
+            }
+          } catch (e) {
+            console.error('🤖 [Telegram Bot] ❌ Erro ao parsear resposta:', e.message);
+            resolve(false);
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        console.error('🤖 [Telegram Bot] ❌ Erro de conexão:', err.message);
+        resolve(false);
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        console.error('🤖 [Telegram Bot] ❌ Timeout com Telegram API');
+        resolve(false);
+      });
+
+      req.write(payload);
+      req.end();
+    } catch (err) {
+      console.error('🤖 [Telegram Bot] ❌ Exceção:', err.message);
+      resolve(false);
     }
-  } catch (err) {
-    console.error('🤖 [Telegram Bot] ❌ Erro de conexão:', err.message);
-    return false;
-  }
+  });
 }
 
 // Inicia o robô autônomo de ofertas do Mercado Livre a cada 30 minutos

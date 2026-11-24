@@ -23,7 +23,11 @@ const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 
 // Inicializa banco de dados (PostgreSQL se DATABASE_URL estiver configurada, ou JSON local)
-db.initDatabase();
+db.initDatabase().then(() => {
+  setupTelegramWebhook();
+}).catch(err => {
+  console.error('Erro ao inicializar banco de dados:', err);
+});
 
 // Middlewares
 app.use(cors());
@@ -149,14 +153,21 @@ async function notifyOwnerViaTelegram(msg) {
   const text = `🔥 NOVA DÚVIDA RECEBIDA NO SUA PROMO!\n\n` +
     `👤 Cliente: ${msg.username}${phoneInfo}${prodInfo}\n` +
     `💬 Dúvida: "${msg.question}"\n\n` +
-    `👉 Responda no painel: https://suapromo.onrender.com/admin.html`;
+    `👉 Toque no botão abaixo para responder pelo painel:`;
 
   return new Promise((resolve) => {
     try {
       const payload = JSON.stringify({
         chat_id: String(chatId).trim(),
         text,
-        disable_web_page_preview: true
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '💬 Abrir Painel e Responder', url: 'https://suapromo.onrender.com/admin.html' }
+            ]
+          ]
+        }
       });
 
       const options = {
@@ -209,6 +220,35 @@ async function notifyOwnerViaTelegram(msg) {
       resolve(false);
     }
   });
+}
+
+function setupTelegramWebhook() {
+  const settings = db.getSettings();
+  const token = process.env.TELEGRAM_BOT_TOKEN || settings.telegramBotToken;
+  if (!token) return;
+
+  const webhookUrl = 'https://suapromo.onrender.com/api/telegram-webhook';
+  const postData = JSON.stringify({ url: webhookUrl, drop_pending_updates: true });
+
+  const req = https.request({
+    hostname: 'api.telegram.org',
+    port: 443,
+    path: `/bot${String(token).trim()}/setWebhook`,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(postData)
+    }
+  }, (res) => {
+    let body = '';
+    res.on('data', chunk => body += chunk);
+    res.on('end', () => {
+      console.log('🤖 [Telegram Webhook] Resposta setWebhook:', body);
+    });
+  });
+  req.on('error', err => console.warn('Erro ao configurar webhook Telegram:', err.message));
+  req.write(postData);
+  req.end();
 }
 
 // Inicia o robô autônomo de ofertas do Mercado Livre a cada 30 minutos
@@ -398,8 +438,12 @@ app.post('/api/user/messages', async (req, res) => {
   // Avisa painel do admin via Socket
   io.to('admin-room').emit('admin:new_question', newMsg);
 
-  // 1. Robô avisa o Dono no Telegram na hora
-  notifyOwnerViaTelegram(newMsg);
+  // 1. Robô avisa o Dono no Telegram na hora (garante envio antes de responder)
+  try {
+    await notifyOwnerViaTelegram(newMsg);
+  } catch (tgErr) {
+    console.error('Erro ao notificar Telegram:', tgErr.message);
+  }
 
   // 2. Dispara Web Push de alerta para os aparelhos do Dono
   sendPushNotificationToUser('admin', {
@@ -410,6 +454,59 @@ app.post('/api/user/messages', async (req, res) => {
   });
 
   res.status(201).json({ success: true, message: newMsg });
+});
+
+// --- WEBHOOK PARA COMANDOS NO BOT DO TELEGRAM ---
+app.post('/api/telegram-webhook', async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const update = req.body;
+    if (!update || !update.message) return;
+    const fromId = update.message.chat && update.message.chat.id;
+    const text = (update.message.text || '').trim();
+
+    const settings = db.getSettings();
+    const token = process.env.TELEGRAM_BOT_TOKEN || settings.telegramBotToken;
+    if (!token || !fromId) return;
+
+    const messages = await db.getMessages();
+    const pendingCount = messages.filter(m => m.status === 'pending').length;
+
+    let replyText = `🤖 Olá, João! O Robô do Sua Promo está 100% ONLINE e ATIVO! 🔥\n\n` +
+      `📊 Status do Sistema:\n` +
+      `• Dúvidas pendentes: ${pendingCount}\n` +
+      `• Monitor de Ofertas: Ativo\n` +
+      `• Notificações WebPush: Ativas\n\n` +
+      `Sempre que qualquer visitante enviar uma pergunta em qualquer produto, você receberá um alerta imediato aqui!`;
+
+    const payload = JSON.stringify({
+      chat_id: fromId,
+      text: replyText,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🚀 Abrir Painel do Dono', url: 'https://suapromo.onrender.com/admin.html' }],
+          [{ text: '🛒 Ver Vitrine de Ofertas', url: 'https://suapromo.onrender.com' }]
+        ]
+      }
+    });
+
+    const opt = {
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: `/bot${String(token).trim()}/sendMessage`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    };
+    const tgReq = https.request(opt);
+    tgReq.on('error', err => console.warn('Erro resposta webhook:', err.message));
+    tgReq.write(payload);
+    tgReq.end();
+  } catch (err) {
+    console.error('Erro processando webhook Telegram:', err.message);
+  }
 });
 
 // --- CONFIGURAÇÃO DO ROBÔ DE ALERTAS (TELEGRAM) ---
@@ -429,6 +526,7 @@ app.post('/api/admin/settings/telegram', requireAdmin, async (req, res) => {
   settings.telegramBotToken = (token && token.trim()) || '';
   settings.telegramChatId = (chatId && chatId.trim()) || '';
   await db.saveSettings(settings);
+  setupTelegramWebhook();
   res.json({ success: true, settings: { telegramBotToken: settings.telegramBotToken, telegramChatId: settings.telegramChatId } });
 });
 

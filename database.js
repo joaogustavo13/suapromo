@@ -93,17 +93,36 @@ async function initDatabase() {
     // Sincroniza configurações globais no PostgreSQL
     try {
       const settingsRes = await pool.query("SELECT value FROM app_settings WHERE key = 'global'");
+      const fileSettings = readJson(SETTINGS_FILE, {});
       if (settingsRes.rows.length > 0) {
-        cachedSettings = { ...readJson(SETTINGS_FILE, {}), ...settingsRes.rows[0].value };
+        const pgSettings = settingsRes.rows[0].value || {};
+        cachedSettings = { ...fileSettings, ...pgSettings };
+
+        // Preserva valores essenciais do arquivo se vierem em branco do banco antigo
+        if (!cachedSettings.telegramBotToken && fileSettings.telegramBotToken) {
+          cachedSettings.telegramBotToken = fileSettings.telegramBotToken;
+        }
+        if (!cachedSettings.telegramChatId && fileSettings.telegramChatId) {
+          cachedSettings.telegramChatId = fileSettings.telegramChatId;
+        }
+        if (!cachedSettings.adminPassword && fileSettings.adminPassword) {
+          cachedSettings.adminPassword = fileSettings.adminPassword;
+        }
         console.log('⚙️ [Settings] Configurações carregadas do PostgreSQL com sucesso.');
       } else {
-        await pool.query(
-          "INSERT INTO app_settings (key, value, updated_at) VALUES ('global', $1, NOW()) ON CONFLICT (key) DO NOTHING",
-          [JSON.stringify(cachedSettings)]
-        );
+        cachedSettings = { ...fileSettings };
       }
+
+      // Sincroniza de volta no banco para garantir que token e chat ID estejam gravados
+      await pool.query(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ('global', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+        [JSON.stringify(cachedSettings)]
+      );
+      console.log('⚙️ [Settings] Configurações sincronizadas no PostgreSQL.');
     } catch (setErr) {
-      console.warn('⚠️ Erro ao carregar app_settings do PostgreSQL:', setErr.message);
+      console.warn('⚠️ Erro ao carregar/salvar app_settings do PostgreSQL:', setErr.message);
     }
 
     // Migração inicial: se a tabela de mensagens estiver vazia, importa do JSON local

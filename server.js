@@ -31,8 +31,8 @@ db.initDatabase().then(() => {
 
 // Middlewares
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Helpers JSON
@@ -137,6 +137,81 @@ async function broadcastPushNotification(payload) {
 }
 
 // --- NOTIFICAÇÃO AO DONO (ROBÔ TELEGRAM) ---
+function sendAudioToTelegram(token, chatId, msg) {
+  return new Promise((resolve) => {
+    try {
+      const match = (msg.questionAudio || '').match(/^data:audio\/([a-zA-Z0-9.-]+);base64,(.+)$/);
+      if (!match) return resolve(false);
+
+      const ext = match[1].includes('mp4') ? 'm4a' : (match[1].includes('webm') ? 'webm' : 'ogg');
+      const audioBuffer = Buffer.from(match[2], 'base64');
+
+      const phoneInfo = msg.phone ? `\n📱 WhatsApp: ${msg.phone}` : '';
+      const prodInfo = msg.productTitle ? `\n🏷️ Oferta: ${msg.productTitle}` : '';
+      const caption = `🎤 ÁUDIO DO CLIENTE NO SUA PROMO!\n\n` +
+        `👤 Cliente: ${msg.username}${phoneInfo}${prodInfo}\n\n` +
+        `👉 Toque para ouvir o áudio do cliente e responda no painel:`;
+
+      const inlineKeyboard = {
+        inline_keyboard: [
+          [{ text: '💬 Abrir Painel e Responder', url: 'https://suapromo.onrender.com/admin.html' }]
+        ]
+      };
+
+      const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+      const parts = [];
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${String(chatId).trim()}\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="reply_markup"\r\n\r\n${JSON.stringify(inlineKeyboard)}\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="audio_${msg.id}.${ext}"\r\nContent-Type: audio/${ext}\r\n\r\n`));
+      parts.push(audioBuffer);
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+      const fullLen = parts.reduce((a, b) => a + b.length, 0);
+
+      const req = https.request({
+        hostname: 'api.telegram.org',
+        port: 443,
+        path: `/bot${String(token).trim()}/sendAudio`,
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': fullLen
+        },
+        timeout: 20000
+      }, res => {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            if (data.ok) {
+              console.log('🤖 [Telegram Bot] ✅ Áudio do cliente enviado ao Telegram do dono!');
+              resolve(true);
+            } else {
+              console.warn('🤖 [Telegram Bot] ❌ Erro envio áudio Telegram:', data.description);
+              resolve(false);
+            }
+          } catch (e) {
+            resolve(false);
+          }
+        });
+      });
+
+      req.on('error', err => {
+        console.error('🤖 [Telegram Bot] Erro de rede ao enviar áudio:', err.message);
+        resolve(false);
+      });
+
+      parts.forEach(p => req.write(p));
+      req.end();
+    } catch (err) {
+      console.error('🤖 [Telegram Bot] Exceção ao enviar áudio:', err.message);
+      resolve(false);
+    }
+  });
+}
+
 async function notifyOwnerViaTelegram(msg) {
   const settings = db.getSettings();
   const token = process.env.TELEGRAM_BOT_TOKEN || settings.telegramBotToken;
@@ -145,6 +220,11 @@ async function notifyOwnerViaTelegram(msg) {
   if (!token || !chatId) {
     console.warn('🤖 [Telegram Bot] Token ou Chat ID não configurados.');
     return false;
+  }
+
+  // Se o cliente enviou áudio, despacha o arquivo de áudio diretamente para o Telegram do dono!
+  if (msg.questionAudio && msg.questionAudio.startsWith('data:audio/')) {
+    return sendAudioToTelegram(token, chatId, msg);
   }
 
   const phoneInfo = msg.phone ? `\n📱 WhatsApp do Cliente: ${msg.phone}` : '';
@@ -407,12 +487,12 @@ app.get('/api/user/messages', async (req, res) => {
   res.json(userMessages);
 });
 
-// Usuário envia uma dúvida sobre um produto
+// Usuário envia uma dúvida sobre um produto (texto ou áudio)
 app.post('/api/user/messages', async (req, res) => {
-  const { userId, username, productId, productTitle, productImage, productLink, phone, question } = req.body;
+  const { userId, username, productId, productTitle, productImage, productLink, phone, question, questionAudio } = req.body;
 
-  if (!userId || !question || !question.trim()) {
-    return res.status(400).json({ error: 'Usuário e pergunta são obrigatórios.' });
+  if (!userId || ((!question || !question.trim()) && !questionAudio)) {
+    return res.status(400).json({ error: 'Envie sua dúvida em texto ou por áudio.' });
   }
 
   const now = new Date().toISOString();
@@ -426,8 +506,10 @@ app.post('/api/user/messages', async (req, res) => {
     productTitle: productTitle || null,
     productImage: productImage || null,
     productLink: productLink || null,
-    question: question.trim(),
+    question: (question && question.trim()) || '🎤 [Dúvida em Áudio]',
+    questionAudio: questionAudio || null,
     reply: null,
+    replyAudio: null,
     status: 'pending', // 'pending' | 'answered'
     createdAt: now,
     repliedAt: null
@@ -552,17 +634,18 @@ app.get('/api/admin/messages', requireAdmin, async (req, res) => {
   res.json(messages);
 });
 
-// Dono responde à dúvida
+// Dono responde à dúvida (texto ou áudio)
 app.post('/api/admin/reply/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { reply } = req.body;
+  const { reply, replyAudio } = req.body;
 
-  if (!reply || !reply.trim()) {
-    return res.status(400).json({ error: 'Resposta não pode ser vazia.' });
+  if ((!reply || !reply.trim()) && !replyAudio) {
+    return res.status(400).json({ error: 'Envie uma resposta em texto ou por áudio.' });
   }
 
   const now = new Date().toISOString();
-  const updatedMsg = await db.updateMessageReply(id, reply.trim(), now);
+  const effectiveReply = (reply && reply.trim()) || '🎤 [Resposta em Áudio]';
+  const updatedMsg = await db.updateMessageReply(id, effectiveReply, now, replyAudio || null);
 
   if (!updatedMsg) {
     return res.status(404).json({ error: 'Mensagem não encontrada.' });
@@ -573,9 +656,13 @@ app.post('/api/admin/reply/:id', requireAdmin, async (req, res) => {
   io.to('admin-room').emit('admin:message_updated', updatedMsg);
 
   // Notifica via Web Push para TODOS os celulares cadastrados (mesmo site fechado)
+  const pushBody = replyAudio
+    ? 'Temos uma resposta em áudio para você! Toque para ouvir.'
+    : 'Temos uma promoção para você! Toque para conferir.';
+
   await broadcastPushNotification({
     title: 'Sua Promo 🔥',
-    body: 'Temos uma promoção para você! Toque para conferir.',
+    body: pushBody,
     icon: '/icons/icon-192.png',
     url: '/'
   });

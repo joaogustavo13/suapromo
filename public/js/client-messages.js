@@ -3,6 +3,81 @@ let socket = null;
 let currentUser = null;
 let pendingProductToAsk = null;
 let userMessages = [];
+let clientVoiceRecorder = null;
+let clientRecordedAudio = null;
+
+// Inicialização do Gravador de Áudio do Cliente
+function initClientAudioRecorder() {
+  clientRecordedAudio = null;
+  clientVoiceRecorder = new AudioVoiceRecorder({
+    onStateChange: (state, seconds) => {
+      renderClientRecorderUI(state, seconds);
+    },
+    onReady: (base64Audio, seconds) => {
+      clientRecordedAudio = base64Audio;
+      renderClientRecorderUI('ready', seconds);
+    },
+    onCancel: () => {
+      clientRecordedAudio = null;
+      renderClientRecorderUI('idle', 0);
+    }
+  });
+  renderClientRecorderUI('idle', 0);
+}
+
+function renderClientRecorderUI(state, seconds = 0) {
+  const container = document.getElementById('client-audio-record-zone');
+  if (!container) return;
+
+  if (state === 'idle') {
+    container.innerHTML = `
+      <div class="audio-record-btn-row">
+        <button type="button" class="btn-record-mic" onclick="startClientAudioRecording()">
+          🎙️ Gravar Dúvida em Áudio
+        </button>
+      </div>
+    `;
+  } else if (state === 'recording') {
+    container.innerHTML = `
+      <div class="recording-active-bar">
+        <div class="recording-indicator"></div>
+        <span class="recording-timer">${formatAudioSeconds(seconds)}</span>
+        <button type="button" class="btn-record-stop" onclick="stopClientAudioRecording()">⏹️ Concluir</button>
+        <button type="button" class="btn-record-cancel" onclick="cancelClientAudioRecording()">✕ Cancelar</button>
+      </div>
+    `;
+  } else if (state === 'ready' && clientRecordedAudio) {
+    container.innerHTML = `
+      <div class="audio-preview-box">
+        <span style="font-size: 0.82rem; font-weight: 700; color: #059669; white-space: nowrap;">✅ Áudio gravado!</span>
+        <div style="flex: 1; min-width: 0;">
+          ${renderAudioPlayer(clientRecordedAudio, 'client_preview_player', 'Prévia da sua dúvida')}
+        </div>
+        <button type="button" class="btn-discard-audio" onclick="discardClientAudioRecording()" title="Descartar áudio">
+          🗑️ Descartar
+        </button>
+      </div>
+    `;
+  }
+}
+
+function startClientAudioRecording() {
+  if (!clientVoiceRecorder) initClientAudioRecorder();
+  clientVoiceRecorder.start();
+}
+
+function stopClientAudioRecording() {
+  if (clientVoiceRecorder) clientVoiceRecorder.stop();
+}
+
+function cancelClientAudioRecording() {
+  if (clientVoiceRecorder) clientVoiceRecorder.cancel();
+}
+
+function discardClientAudioRecording() {
+  clientRecordedAudio = null;
+  if (clientVoiceRecorder) clientVoiceRecorder.cancel();
+}
 
 // Carrega usuário salvo do localStorage
 try {
@@ -181,12 +256,14 @@ function openAskModal(prodId, prodTitle, prodPrice, prodImg, prodLink) {
   document.getElementById('logged-user-display').textContent = currentUser.username;
 
   document.getElementById('ask-modal-overlay').style.display = 'flex';
+  initClientAudioRecorder();
   setTimeout(() => document.getElementById('client-question').focus(), 100);
 }
 
 function closeAskModal() {
   document.getElementById('ask-modal-overlay').style.display = 'none';
   document.getElementById('client-question').value = '';
+  discardClientAudioRecording();
 }
 
 async function submitProductQuestion(e) {
@@ -203,7 +280,10 @@ async function submitProductQuestion(e) {
   const prodImg = document.getElementById('ask-prod-image').value;
   const prodLink = document.getElementById('ask-prod-link').value;
 
-  if (!question) return;
+  if (!question && !clientRecordedAudio) {
+    showToast('Digite sua dúvida ou grave um áudio para enviar.');
+    return;
+  }
 
   const btn = document.getElementById('btn-submit-question');
   btn.disabled = true;
@@ -221,7 +301,8 @@ async function submitProductQuestion(e) {
         productImage: prodImg,
         productLink: prodLink,
         phone,
-        question
+        question: question || '🎤 [Dúvida em Áudio]',
+        questionAudio: clientRecordedAudio || null
       })
     });
 
@@ -243,7 +324,7 @@ async function submitProductQuestion(e) {
     showToast('Erro de conexão ao enviar.');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Enviar Dúvida ao Vendedor 🚀';
+    btn.textContent = 'Enviar Dúvida sobre a Oferta 🚀';
   }
 }
 
@@ -308,14 +389,16 @@ function renderUserMessagesList() {
         <div class="ticket-messages-thread">
           <div class="ticket-bubble bubble-client">
             <div class="bubble-sender">Você (${escapeHtml(currentUser.username)})</div>
-            <div class="bubble-text">${escapeHtml(m.question)}</div>
+            ${m.question && m.question !== '🎤 [Dúvida em Áudio]' ? `<div class="bubble-text">${escapeHtml(m.question)}</div>` : ''}
+            ${m.questionAudio ? renderAudioPlayer(m.questionAudio, 'q_voice_' + m.id, 'Sua dúvida em áudio') : ''}
             <span class="bubble-time">${qTime}</span>
           </div>
 
           ${isAnswered ? `
             <div class="ticket-bubble bubble-admin">
               <div class="bubble-sender">Equipe Sua Promo</div>
-              <div class="bubble-text">${escapeHtml(m.reply)}</div>
+              ${m.reply && m.reply !== '🎤 [Resposta em Áudio]' ? `<div class="bubble-text">${escapeHtml(m.reply)}</div>` : ''}
+              ${m.replyAudio ? renderAudioPlayer(m.replyAudio, 'r_voice_' + m.id, 'Resposta em áudio do vendedor') : ''}
               <span class="bubble-time">${rTime}</span>
             </div>
           ` : `

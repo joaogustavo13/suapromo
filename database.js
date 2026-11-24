@@ -67,11 +67,17 @@ async function initDatabase() {
         product_image TEXT,
         product_link TEXT,
         question TEXT,
+        question_audio TEXT,
         reply TEXT,
+        reply_audio TEXT,
         status VARCHAR(32) DEFAULT 'pending',
         created_at TIMESTAMPTZ DEFAULT NOW(),
         replied_at TIMESTAMPTZ
       );
+
+      -- Garante novas colunas de áudio caso a tabela já exista
+      ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS question_audio TEXT;
+      ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS reply_audio TEXT;
 
       CREATE TABLE IF NOT EXISTS app_subscriptions (
         endpoint TEXT PRIMARY KEY,
@@ -171,7 +177,9 @@ async function getMessages(userId = null) {
         productImage: r.product_image,
         productLink: r.product_link,
         question: r.question,
+        questionAudio: r.question_audio || null,
         reply: r.reply,
+        replyAudio: r.reply_audio || null,
         status: r.status,
         createdAt: r.created_at,
         repliedAt: r.replied_at
@@ -193,9 +201,25 @@ async function addMessage(msg) {
   if (usePostgres) {
     try {
       await pool.query(
-        `INSERT INTO app_messages (id, user_id, username, phone, product_id, product_title, product_image, product_link, question, reply, status, created_at, replied_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [msg.id, msg.userId, msg.username, msg.phone || null, msg.productId, msg.productTitle, msg.productImage, msg.productLink, msg.question, msg.reply || null, msg.status || 'pending', msg.createdAt, msg.repliedAt || null]
+        `INSERT INTO app_messages (id, user_id, username, phone, product_id, product_title, product_image, product_link, question, question_audio, reply, reply_audio, status, created_at, replied_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+        [
+          msg.id,
+          msg.userId,
+          msg.username,
+          msg.phone || null,
+          msg.productId,
+          msg.productTitle,
+          msg.productImage,
+          msg.productLink,
+          msg.question || '',
+          msg.questionAudio || null,
+          msg.reply || null,
+          msg.replyAudio || null,
+          msg.status || 'pending',
+          msg.createdAt,
+          msg.repliedAt || null
+        ]
       );
     } catch (err) {
       console.error('Erro addMessage Postgres:', err);
@@ -208,13 +232,13 @@ async function addMessage(msg) {
   writeJson(MESSAGES_FILE, messages);
 }
 
-async function updateMessageReply(id, reply, repliedAt) {
+async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {
   let updatedMsg = null;
   if (usePostgres) {
     try {
       const res = await pool.query(
-        `UPDATE app_messages SET reply = $1, status = 'answered', replied_at = $2 WHERE id = $3 RETURNING *`,
-        [reply, repliedAt, id]
+        `UPDATE app_messages SET reply = $1, reply_audio = $2, status = 'answered', replied_at = $3 WHERE id = $4 RETURNING *`,
+        [reply, replyAudio, repliedAt, id]
       );
       if (res.rows.length > 0) {
         const r = res.rows[0];
@@ -228,7 +252,9 @@ async function updateMessageReply(id, reply, repliedAt) {
           productImage: r.product_image,
           productLink: r.product_link,
           question: r.question,
+          questionAudio: r.question_audio || null,
           reply: r.reply,
+          replyAudio: r.reply_audio || null,
           status: r.status,
           createdAt: r.created_at,
           repliedAt: r.replied_at
@@ -243,6 +269,7 @@ async function updateMessageReply(id, reply, repliedAt) {
   const index = messages.findIndex(m => m.id === id);
   if (index !== -1) {
     messages[index].reply = reply;
+    messages[index].replyAudio = replyAudio || null;
     messages[index].status = 'answered';
     messages[index].repliedAt = repliedAt;
     writeJson(MESSAGES_FILE, messages);

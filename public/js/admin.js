@@ -298,6 +298,8 @@ function selectAdminMessage(msgId) {
   const msg = messagesList.find(m => m.id === msgId);
   if (!msg) return;
 
+  discardAdminRecording();
+
   // Mobile: abre a visão da conversa ocupando 100% da tela
   const dashboard = document.querySelector('.chat-dashboard');
   if (dashboard) dashboard.classList.add('mobile-chat-open');
@@ -349,6 +351,96 @@ function selectAdminMessage(msgId) {
   }, 100);
 }
 
+// --- GRAVADOR DE ÁUDIO DO ADMIN (RESPOSTA POR VOZ) ---
+let adminVoiceRecorder = null;
+let adminRecordedAudio = null;
+
+function initAdminAudioRecorder() {
+  adminRecordedAudio = null;
+  adminVoiceRecorder = new AudioVoiceRecorder({
+    onStateChange: (state, seconds) => {
+      renderAdminRecorderUI(state, seconds);
+    },
+    onReady: (base64Audio, seconds) => {
+      adminRecordedAudio = base64Audio;
+      renderAdminRecorderUI('ready', seconds);
+    },
+    onCancel: () => {
+      adminRecordedAudio = null;
+      renderAdminRecorderUI('idle', 0);
+    }
+  });
+  renderAdminRecorderUI('idle', 0);
+}
+
+function renderAdminRecorderUI(state, seconds = 0) {
+  const container = document.getElementById('admin-audio-record-zone');
+  const micBtn = document.getElementById('btn-admin-mic');
+  if (!container) return;
+
+  if (state === 'idle') {
+    container.innerHTML = '';
+    if (micBtn) {
+      micBtn.textContent = '🎙️';
+      micBtn.style.background = 'rgba(255, 71, 87, 0.15)';
+      micBtn.style.color = '#ff4757';
+    }
+  } else if (state === 'recording') {
+    if (micBtn) {
+      micBtn.textContent = '⏹️';
+      micBtn.style.background = '#ef4444';
+      micBtn.style.color = '#fff';
+    }
+    container.innerHTML = `
+      <div class="recording-active-bar" style="background: rgba(239, 68, 68, 0.2);">
+        <div class="recording-indicator"></div>
+        <span class="recording-timer">${formatAudioSeconds(seconds)}</span>
+        <button type="button" class="btn-record-stop" onclick="stopAdminRecording()">⏹️ Concluir Gravação</button>
+        <button type="button" class="btn-record-cancel" onclick="cancelAdminRecording()">✕ Cancelar</button>
+      </div>
+    `;
+  } else if (state === 'ready' && adminRecordedAudio) {
+    if (micBtn) {
+      micBtn.textContent = '🎙️';
+      micBtn.style.background = 'rgba(255, 71, 87, 0.15)';
+      micBtn.style.color = '#ff4757';
+    }
+    container.innerHTML = `
+      <div class="audio-preview-box" style="background: rgba(16, 185, 129, 0.15);">
+        <span style="font-size: 0.82rem; font-weight: 700; color: #10b981; white-space: nowrap;">✅ Áudio pronto para envio!</span>
+        <div style="flex: 1; min-width: 0;">
+          ${renderAudioPlayer(adminRecordedAudio, 'admin_preview_player', 'Prévia da sua resposta')}
+        </div>
+        <button type="button" class="btn-discard-audio" onclick="discardAdminRecording()" title="Descartar áudio">
+          🗑️ Descartar
+        </button>
+      </div>
+    `;
+  }
+}
+
+function toggleAdminRecording() {
+  if (!adminVoiceRecorder) initAdminAudioRecorder();
+  if (adminVoiceRecorder.mediaRecorder && adminVoiceRecorder.mediaRecorder.state === 'recording') {
+    adminVoiceRecorder.stop();
+  } else {
+    adminVoiceRecorder.start();
+  }
+}
+
+function stopAdminRecording() {
+  if (adminVoiceRecorder) adminVoiceRecorder.stop();
+}
+
+function cancelAdminRecording() {
+  if (adminVoiceRecorder) adminVoiceRecorder.cancel();
+}
+
+function discardAdminRecording() {
+  adminRecordedAudio = null;
+  if (adminVoiceRecorder) adminVoiceRecorder.cancel();
+}
+
 function renderActiveThread(msg) {
   const container = document.getElementById('active-thread-scroll');
   container.innerHTML = '';
@@ -360,17 +452,19 @@ function renderActiveThread(msg) {
   qDiv.className = 'desk-bubble desk-bubble-visitor';
   qDiv.innerHTML = `
     <div class="desk-bubble-sender">Cliente (${escapeHtml(msg.username)})</div>
-    <div>${escapeHtml(msg.question)}</div>
+    ${msg.question && msg.question !== '🎤 [Dúvida em Áudio]' ? `<div>${escapeHtml(msg.question)}</div>` : ''}
+    ${msg.questionAudio ? renderAudioPlayer(msg.questionAudio, 'admin_q_audio_' + msg.id, 'Áudio do cliente') : ''}
     <span class="desk-bubble-time">${qTime}</span>
   `;
   container.appendChild(qDiv);
 
-  if (msg.reply) {
+  if (msg.reply || msg.replyAudio) {
     const rDiv = document.createElement('div');
     rDiv.className = 'desk-bubble desk-bubble-admin';
     rDiv.innerHTML = `
       <div class="desk-bubble-sender">Você (Atendimento)</div>
-      <div>${escapeHtml(msg.reply)}</div>
+      ${msg.reply && msg.reply !== '🎤 [Resposta em Áudio]' ? `<div>${escapeHtml(msg.reply)}</div>` : ''}
+      ${msg.replyAudio ? renderAudioPlayer(msg.replyAudio, 'admin_r_audio_' + msg.id, 'Seu áudio de resposta') : ''}
       <span class="desk-bubble-time">${rTime}</span>
     `;
     container.appendChild(rDiv);
@@ -379,13 +473,19 @@ function renderActiveThread(msg) {
   container.scrollTop = container.scrollHeight;
 }
 
-// Envia resposta
+// Envia resposta (texto ou áudio)
 async function sendReplyToUser(e) {
   if (e) e.preventDefault();
   const input = document.getElementById('admin-reply-input');
-  const text = input.value.trim();
+  const text = input ? input.value.trim() : '';
 
-  if (!text || !currentMsgId || !adminToken) return;
+  if ((!text && !adminRecordedAudio) || !currentMsgId || !adminToken) {
+    showToast('Digite uma mensagem ou grave um áudio para responder.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-admin-submit-reply');
+  if (btn) btn.disabled = true;
 
   try {
     const res = await fetch(`/api/admin/reply/${currentMsgId}`, {
@@ -394,12 +494,16 @@ async function sendReplyToUser(e) {
         'Content-Type': 'application/json',
         'x-admin-token': adminToken
       },
-      body: JSON.stringify({ reply: text })
+      body: JSON.stringify({
+        reply: text,
+        replyAudio: adminRecordedAudio || null
+      })
     });
 
     if (res.ok) {
-      input.value = '';
-      showToast('Resposta enviada! O cliente foi notificado.');
+      if (input) input.value = '';
+      discardAdminRecording();
+      showToast('✅ Resposta enviada! O cliente foi notificado.');
       loadAdminMessages();
       const data = await res.json();
       renderActiveThread(data.message);
@@ -408,6 +512,8 @@ async function sendReplyToUser(e) {
     }
   } catch (err) {
     showToast('Erro de conexão ao enviar resposta.');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -441,6 +547,7 @@ async function deleteCurrentMessage() {
 
 function closeMobileChat() {
   currentMsgId = null;
+  discardAdminRecording();
   const dashboard = document.querySelector('.chat-dashboard');
   if (dashboard) dashboard.classList.remove('mobile-chat-open');
   document.getElementById('active-message-container').style.display = 'none';

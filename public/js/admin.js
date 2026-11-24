@@ -298,6 +298,10 @@ function selectAdminMessage(msgId) {
   const msg = messagesList.find(m => m.id === msgId);
   if (!msg) return;
 
+  // Mobile: abre a visão da conversa ocupando 100% da tela
+  const dashboard = document.querySelector('.chat-dashboard');
+  if (dashboard) dashboard.classList.add('mobile-chat-open');
+
   document.getElementById('no-message-selected').style.display = 'none';
   document.getElementById('active-message-container').style.display = 'flex';
 
@@ -427,14 +431,21 @@ async function deleteCurrentMessage() {
 
     if (res.ok) {
       showToast('Dúvida excluída com sucesso.');
-      currentMsgId = null;
-      document.getElementById('active-message-container').style.display = 'none';
-      document.getElementById('no-message-selected').style.display = 'flex';
+      closeMobileChat();
       loadAdminMessages();
     }
   } catch (err) {
     showToast('Erro ao excluir.');
   }
+}
+
+function closeMobileChat() {
+  currentMsgId = null;
+  const dashboard = document.querySelector('.chat-dashboard');
+  if (dashboard) dashboard.classList.remove('mobile-chat-open');
+  document.getElementById('active-message-container').style.display = 'none';
+  document.getElementById('no-message-selected').style.display = 'flex';
+  renderAdminMessagesSidebar();
 }
 
 function setupFilterInput() {

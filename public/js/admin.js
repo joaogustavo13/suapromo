@@ -48,6 +48,7 @@ function unlockDashboard() {
   initAdminSocket();
   loadAdminMessages();
   loadDealsList();
+  loadTelegramSettings();
 }
 
 // Login do Administrador
@@ -173,6 +174,8 @@ function switchTab(tabId) {
 
   if (tabId === 'tab-robot') {
     loadDealsList();
+  } else if (tabId === 'tab-bot') {
+    loadTelegramSettings();
   }
 }
 
@@ -599,6 +602,134 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.style.display = 'block';
   setTimeout(() => toast.style.display = 'none', 4000);
+}
+
+// --- ROBÔ DE ALERTAS DO TELEGRAM ---
+
+async function loadTelegramSettings() {
+  if (!adminToken) return;
+  try {
+    const res = await fetch('/api/admin/settings/telegram', {
+      headers: { 'x-admin-token': adminToken }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const tokenInput = document.getElementById('telegram-bot-token');
+      const chatInput = document.getElementById('telegram-chat-id');
+      if (tokenInput && data.token) tokenInput.value = data.token;
+      if (chatInput && data.chatId) chatInput.value = data.chatId;
+    }
+  } catch (err) {
+    console.error('Erro ao carregar configurações do Telegram:', err);
+  }
+}
+
+async function handleSaveTelegramSettings(e) {
+  e.preventDefault();
+  if (!adminToken) return;
+
+  const token = document.getElementById('telegram-bot-token').value.trim();
+  const chatId = document.getElementById('telegram-chat-id').value.trim();
+  const msgEl = document.getElementById('telegram-save-msg');
+  const btn = document.getElementById('btn-save-telegram');
+
+  btn.disabled = true;
+  btn.textContent = 'Salvando...';
+
+  try {
+    const res = await fetch('/api/admin/settings/telegram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': adminToken
+      },
+      body: JSON.stringify({ token, chatId })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      msgEl.textContent = '✅ Configurações do robô salvas com sucesso!';
+      msgEl.style.background = '#dcfce7';
+      msgEl.style.color = '#15803d';
+      msgEl.style.display = 'block';
+      showToast('Robô do Telegram salvo!');
+    } else {
+      msgEl.textContent = '❌ Erro ao salvar configurações.';
+      msgEl.style.background = '#fee2e2';
+      msgEl.style.color = '#b91c1c';
+      msgEl.style.display = 'block';
+    }
+  } catch (err) {
+    msgEl.textContent = '❌ Erro de conexão com o servidor.';
+    msgEl.style.background = '#fee2e2';
+    msgEl.style.color = '#b91c1c';
+    msgEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Salvar Configurações';
+  }
+}
+
+async function handleTestTelegram() {
+  if (!adminToken) return;
+  const btn = document.getElementById('btn-test-telegram');
+  const msgEl = document.getElementById('telegram-save-msg');
+
+  // Salva primeiro antes de testar
+  const token = document.getElementById('telegram-bot-token').value.trim();
+  const chatId = document.getElementById('telegram-chat-id').value.trim();
+  if (!token || !chatId) {
+    msgEl.textContent = '⚠️ Preencha o Token do Bot e o seu Chat ID antes de testar.';
+    msgEl.style.background = '#fef3c7';
+    msgEl.style.color = '#b45309';
+    msgEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Enviando teste...';
+
+  try {
+    // Garante que os campos atuais foram salvos
+    await fetch('/api/admin/settings/telegram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': adminToken
+      },
+      body: JSON.stringify({ token, chatId })
+    });
+
+    const res = await fetch('/api/admin/test-telegram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-token': adminToken
+      }
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      msgEl.textContent = '🚀 Sucesso! Mensagem de teste enviada para o seu Telegram. Verifique seu app!';
+      msgEl.style.background = '#dcfce7';
+      msgEl.style.color = '#15803d';
+      msgEl.style.display = 'block';
+      showToast('Alerta de teste enviado no Telegram!');
+    } else {
+      msgEl.textContent = `❌ ${data.error || 'Falha ao enviar mensagem de teste.'}`;
+      msgEl.style.background = '#fee2e2';
+      msgEl.style.color = '#b91c1c';
+      msgEl.style.display = 'block';
+    }
+  } catch (err) {
+    msgEl.textContent = '❌ Erro de conexão ao testar Telegram.';
+    msgEl.style.background = '#fee2e2';
+    msgEl.style.color = '#b91c1c';
+    msgEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚀 Testar Alerta no Telegram';
+  }
 }
 
 function escapeHtml(text) {

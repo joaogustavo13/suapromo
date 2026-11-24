@@ -7,9 +7,11 @@ const DATA_DIR = path.join(__dirname, 'data');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 let pool = null;
 let usePostgres = false;
+let cachedSettings = readJson(SETTINGS_FILE, {});
 
 // Helpers JSON
 function readJson(file, defaultValue = []) {
@@ -77,10 +79,32 @@ async function initDatabase() {
         subscription JSONB NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key VARCHAR(64) PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
 
     usePostgres = true;
     console.log('🐘 PostgreSQL conectado e tabelas sincronizadas com sucesso! Dados 100% persistentes.');
+
+    // Sincroniza configurações globais no PostgreSQL
+    try {
+      const settingsRes = await pool.query("SELECT value FROM app_settings WHERE key = 'global'");
+      if (settingsRes.rows.length > 0) {
+        cachedSettings = { ...readJson(SETTINGS_FILE, {}), ...settingsRes.rows[0].value };
+        console.log('⚙️ [Settings] Configurações carregadas do PostgreSQL com sucesso.');
+      } else {
+        await pool.query(
+          "INSERT INTO app_settings (key, value, updated_at) VALUES ('global', $1, NOW()) ON CONFLICT (key) DO NOTHING",
+          [JSON.stringify(cachedSettings)]
+        );
+      }
+    } catch (setErr) {
+      console.warn('⚠️ Erro ao carregar app_settings do PostgreSQL:', setErr.message);
+    }
 
     // Migração inicial: se a tabela de mensagens estiver vazia, importa do JSON local
     const countRes = await pool.query('SELECT COUNT(*) FROM app_messages');
@@ -340,6 +364,28 @@ function isUsingPostgres() {
   return usePostgres;
 }
 
+function getSettings() {
+  return cachedSettings;
+}
+
+async function saveSettings(newSettings) {
+  cachedSettings = { ...cachedSettings, ...newSettings };
+  writeJson(SETTINGS_FILE, cachedSettings);
+  if (usePostgres) {
+    try {
+      await pool.query(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ('global', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+        [JSON.stringify(cachedSettings)]
+      );
+    } catch (err) {
+      console.error('Erro saveSettings Postgres:', err);
+    }
+  }
+  return cachedSettings;
+}
+
 module.exports = {
   initDatabase,
   getMessages,
@@ -352,6 +398,8 @@ module.exports = {
   saveSubscription,
   removeSubscription,
   isUsingPostgres,
+  getSettings,
+  saveSettings,
   readJson,
   writeJson
 };

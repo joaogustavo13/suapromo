@@ -131,6 +131,50 @@ async function broadcastPushNotification(payload) {
   return { success: true, sent: successCount, total: allSubs.length };
 }
 
+// --- NOTIFICAÇÃO AO DONO (ROBÔ TELEGRAM) ---
+async function notifyOwnerViaTelegram(msg) {
+  const settings = db.getSettings();
+  const token = process.env.TELEGRAM_BOT_TOKEN || settings.telegramBotToken;
+  const chatId = process.env.TELEGRAM_CHAT_ID || settings.telegramChatId;
+
+  if (!token || !chatId) {
+    return false;
+  }
+
+  const phoneInfo = msg.phone ? `\n📱 *WhatsApp do Cliente:* ${msg.phone}` : '';
+  const prodInfo = msg.productTitle ? `\n🏷️ *Oferta:* ${msg.productTitle}` : '';
+
+  const text = `🔥 *NOVA DÚVIDA RECEBIDA NO SUA PROMO!*\n\n` +
+    `👤 *Cliente:* ${msg.username}${phoneInfo}${prodInfo}\n` +
+    `💬 *Dúvida:* "${msg.question}"\n\n` +
+    `👉 Responda no painel: https://suapromo.onrender.com/admin.html`;
+
+  try {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'Markdown',
+        disable_web_page_preview: true
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      console.log('🤖 [Telegram Bot] ✅ Dono avisado com sucesso no Telegram!');
+      return true;
+    } else {
+      console.warn('🤖 [Telegram Bot] ❌ Erro do Telegram:', data.description);
+      return false;
+    }
+  } catch (err) {
+    console.error('🤖 [Telegram Bot] ❌ Erro de conexão:', err.message);
+    return false;
+  }
+}
+
 // Inicia o robô autônomo de ofertas do Mercado Livre a cada 30 minutos
 startAutoMiningCron(30);
 
@@ -139,8 +183,8 @@ const adminSessions = new Set();
 
 function getAdminPassword() {
   if (process.env.ADMIN_PASSWORD) return process.env.ADMIN_PASSWORD.trim();
-  const settings = readJson(SETTINGS_FILE, {});
-  return settings.adminPassword || 'admin123';
+  const settings = db.getSettings();
+  return settings.adminPassword || 'Paquistao01';
 }
 
 function requireAdmin(req, res, next) {
@@ -183,15 +227,15 @@ app.post('/api/admin/logout', (req, res) => {
 });
 
 // Alterar senha do admin
-app.post('/api/admin/change-password', requireAdmin, (req, res) => {
+app.post('/api/admin/change-password', requireAdmin, async (req, res) => {
   const { newPassword } = req.body;
   if (!newPassword || newPassword.trim().length < 4) {
     return res.status(400).json({ error: 'A nova senha deve ter pelo menos 4 caracteres.' });
   }
 
-  const settings = readJson(SETTINGS_FILE, {});
+  const settings = db.getSettings();
   settings.adminPassword = newPassword.trim();
-  writeJson(SETTINGS_FILE, settings);
+  await db.saveSettings(settings);
 
   res.json({ success: true, message: 'Senha alterada com sucesso!' });
 });
@@ -221,7 +265,7 @@ app.get('/api/products', (req, res) => {
 
 // Configurações públicas
 app.get('/api/settings', (req, res) => {
-  const settings = readJson(SETTINGS_FILE, {});
+  const settings = db.getSettings();
   const { adminPassword, ...publicSettings } = settings;
   res.json(publicSettings);
 });
@@ -315,10 +359,55 @@ app.post('/api/user/messages', async (req, res) => {
 
   await db.addMessage(newMsg);
 
-  // Avisa painel do admin
+  // Avisa painel do admin via Socket
   io.to('admin-room').emit('admin:new_question', newMsg);
 
+  // 1. Robô avisa o Dono no Telegram na hora
+  notifyOwnerViaTelegram(newMsg);
+
+  // 2. Dispara Web Push de alerta para os aparelhos do Dono
+  sendPushNotificationToUser('admin', {
+    title: 'Sua Promo 💬 Nova Dúvida Recebida!',
+    body: `${newMsg.username}: "${newMsg.question.substring(0, 50)}"`,
+    icon: '/icons/icon-192.png',
+    url: '/admin.html'
+  });
+
   res.status(201).json({ success: true, message: newMsg });
+});
+
+// --- CONFIGURAÇÃO DO ROBÔ DE ALERTAS (TELEGRAM) ---
+
+app.get('/api/admin/settings/telegram', requireAdmin, (req, res) => {
+  const settings = db.getSettings();
+  res.json({
+    token: process.env.TELEGRAM_BOT_TOKEN || settings.telegramBotToken || '',
+    chatId: process.env.TELEGRAM_CHAT_ID || settings.telegramChatId || '',
+    isEnvConfigured: !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)
+  });
+});
+
+app.post('/api/admin/settings/telegram', requireAdmin, async (req, res) => {
+  const { token, chatId } = req.body;
+  const settings = db.getSettings();
+  settings.telegramBotToken = (token && token.trim()) || '';
+  settings.telegramChatId = (chatId && chatId.trim()) || '';
+  await db.saveSettings(settings);
+  res.json({ success: true, settings: { telegramBotToken: settings.telegramBotToken, telegramChatId: settings.telegramChatId } });
+});
+
+app.post('/api/admin/test-telegram', requireAdmin, async (req, res) => {
+  const ok = await notifyOwnerViaTelegram({
+    username: 'Teste do Sistema',
+    question: 'Robô de alertas configurado com sucesso! Você será avisado aqui sempre que alguém fizer uma pergunta.',
+    productTitle: 'Robô Sua Promo Ativo'
+  });
+
+  if (ok) {
+    res.json({ success: true, message: 'Alerta de teste enviado para o seu Telegram!' });
+  } else {
+    res.status(400).json({ error: 'Falha ao enviar mensagem no Telegram. Verifique se o Token e o Chat ID estão corretos e se você deu /start no bot.' });
+  }
 });
 
 // --- ADMINISTRAÇÃO DAS MENSAGENS (PROTEGIDAS COM requireAdmin) ---
@@ -364,7 +453,7 @@ app.post('/api/admin/reply/:id', requireAdmin, async (req, res) => {
 
 // Retorna chave pública VAPID para o cliente se inscrever no navegador
 app.get('/api/push-public-key', (req, res) => {
-  const settings = readJson(SETTINGS_FILE, {});
+  const settings = db.getSettings();
   res.json({ publicKey: settings.vapidPublicKey || '' });
 });
 

@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const webpush = require('web-push');
+const db = require('./database');
 const { runAutonomousMining, startAutoMiningCron } = require('./auto-miner');
 
 const app = express();
@@ -19,6 +20,9 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
+
+// Inicializa banco de dados (PostgreSQL se DATABASE_URL estiver configurada, ou JSON local)
+db.initDatabase();
 
 // Middlewares
 app.use(cors());
@@ -91,7 +95,7 @@ async function sendPushNotificationToUser(userId, payload) {
 
 // Dispara Notificação Push para TODOS os celulares/computadores cadastrados no site (logados ou não)
 async function broadcastPushNotification(payload) {
-  const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
+  const subscriptions = await db.getAllSubscriptions();
   const allEndpoints = new Set();
   const allSubs = [];
 
@@ -101,7 +105,7 @@ async function broadcastPushNotification(payload) {
     for (const sub of list) {
       if (sub && sub.endpoint && !allEndpoints.has(sub.endpoint)) {
         allEndpoints.add(sub.endpoint);
-        allSubs.push({ key, sub });
+        allSubs.push(sub);
       }
     }
   }
@@ -110,26 +114,19 @@ async function broadcastPushNotification(payload) {
   if (allSubs.length === 0) return { success: true, count: 0 };
 
   let successCount = 0;
-  for (const item of allSubs) {
+  for (const sub of allSubs) {
     try {
-      await webpush.sendNotification(item.sub, JSON.stringify(payload));
-      console.log(`[WebPush Broadcast] ✅ Push entregue: ${item.sub.endpoint.substring(0, 45)}...`);
+      await webpush.sendNotification(sub, JSON.stringify(payload));
+      console.log(`[WebPush Broadcast] ✅ Push entregue: ${sub.endpoint.substring(0, 45)}...`);
       successCount++;
     } catch (err) {
       console.warn(`[WebPush Broadcast] ❌ Erro em dispositivo:`, err.statusCode || err.message);
       if (err.statusCode === 410 || err.statusCode === 404) {
-        if (subscriptions[item.key]) {
-          if (Array.isArray(subscriptions[item.key])) {
-            subscriptions[item.key] = subscriptions[item.key].filter(s => s.endpoint !== item.sub.endpoint);
-          } else {
-            delete subscriptions[item.key];
-          }
-        }
+        await db.removeSubscription(sub.endpoint);
       }
     }
   }
 
-  writeJson(SUBSCRIPTIONS_FILE, subscriptions);
   console.log(`[WebPush Broadcast] Concluído: ${successCount}/${allSubs.length} celulares notificados.`);
   return { success: true, sent: successCount, total: allSubs.length };
 }
@@ -241,7 +238,7 @@ app.post('/api/miner/run', requireAdmin, async (req, res) => {
 
 // --- AUTENTICAÇÃO SIMPLES (NOME + SENHA) ---
 
-app.post('/api/auth/login-or-register', (req, res) => {
+app.post('/api/auth/login-or-register', async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password || !username.trim() || !password.trim()) {
@@ -249,9 +246,7 @@ app.post('/api/auth/login-or-register', (req, res) => {
   }
 
   const cleanUser = username.trim().toLowerCase();
-  const users = readJson(USERS_FILE, []);
-
-  const existing = users.find(u => u.username.toLowerCase() === cleanUser);
+  const existing = await db.getUserByUsername(cleanUser);
 
   if (existing) {
     // Login
@@ -272,12 +267,11 @@ app.post('/api/auth/login-or-register', (req, res) => {
       password: password,
       createdAt: new Date().toISOString()
     };
-    users.push(newUser);
-    writeJson(USERS_FILE, users);
+    await db.createUser(newUser);
     return res.json({
       success: true,
       action: 'registered',
-      user: { id: newUser.id, username: newUser.displayName }
+      user: { id: newUser.id, username: newUser.displayName || newUser.username }
     });
   }
 });
@@ -285,25 +279,22 @@ app.post('/api/auth/login-or-register', (req, res) => {
 // --- SISTEMA DE MENSAGENS DO CLIENTE ---
 
 // Mensagens do usuário logado
-app.get('/api/user/messages', (req, res) => {
+app.get('/api/user/messages', async (req, res) => {
   const { userId } = req.query;
   if (!userId) return res.status(400).json({ error: 'userId obrigatório' });
 
-  const messages = readJson(MESSAGES_FILE, []);
-  const userMessages = messages.filter(m => m.userId === userId);
-  userMessages.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const userMessages = await db.getMessages(userId);
   res.json(userMessages);
 });
 
 // Usuário envia uma dúvida sobre um produto
-app.post('/api/user/messages', (req, res) => {
+app.post('/api/user/messages', async (req, res) => {
   const { userId, username, productId, productTitle, productImage, productLink, phone, question } = req.body;
 
   if (!userId || !question || !question.trim()) {
     return res.status(400).json({ error: 'Usuário e pergunta são obrigatórios.' });
   }
 
-  const messages = readJson(MESSAGES_FILE, []);
   const now = new Date().toISOString();
 
   const newMsg = {
@@ -322,8 +313,7 @@ app.post('/api/user/messages', (req, res) => {
     repliedAt: null
   };
 
-  messages.unshift(newMsg);
-  writeJson(MESSAGES_FILE, messages);
+  await db.addMessage(newMsg);
 
   // Avisa painel do admin
   io.to('admin-room').emit('admin:new_question', newMsg);
@@ -334,9 +324,8 @@ app.post('/api/user/messages', (req, res) => {
 // --- ADMINISTRAÇÃO DAS MENSAGENS (PROTEGIDAS COM requireAdmin) ---
 
 // Lista todas as dúvidas
-app.get('/api/admin/messages', requireAdmin, (req, res) => {
-  const messages = readJson(MESSAGES_FILE, []);
-  messages.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+app.get('/api/admin/messages', requireAdmin, async (req, res) => {
+  const messages = await db.getMessages();
   res.json(messages);
 });
 
@@ -349,23 +338,16 @@ app.post('/api/admin/reply/:id', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Resposta não pode ser vazia.' });
   }
 
-  const messages = readJson(MESSAGES_FILE, []);
-  const index = messages.findIndex(m => m.id === id);
+  const now = new Date().toISOString();
+  const updatedMsg = await db.updateMessageReply(id, reply.trim(), now);
 
-  if (index === -1) {
+  if (!updatedMsg) {
     return res.status(404).json({ error: 'Mensagem não encontrada.' });
   }
 
-  const now = new Date().toISOString();
-  messages[index].reply = reply.trim();
-  messages[index].status = 'answered';
-  messages[index].repliedAt = now;
-
-  writeJson(MESSAGES_FILE, messages);
-
   // Notifica via Socket o usuário (se estiver com a página aberta)
-  io.to(`user_${messages[index].userId}`).emit('user:message_answered', messages[index]);
-  io.to('admin-room').emit('admin:message_updated', messages[index]);
+  io.to(`user_${updatedMsg.userId}`).emit('user:message_answered', updatedMsg);
+  io.to('admin-room').emit('admin:message_updated', updatedMsg);
 
   // Notifica via Web Push para TODOS os celulares cadastrados (mesmo site fechado)
   await broadcastPushNotification({
@@ -375,7 +357,7 @@ app.post('/api/admin/reply/:id', requireAdmin, async (req, res) => {
     url: '/'
   });
 
-  res.json({ success: true, message: messages[index] });
+  res.json({ success: true, message: updatedMsg });
 });
 
 // --- ROTAS DE WEB PUSH NOTIFICATION ---
@@ -387,31 +369,15 @@ app.get('/api/push-public-key', (req, res) => {
 });
 
 // Salva inscrição Push do dispositivo (funciona logado ou NÃO LOGADO / visitante)
-app.post('/api/user/push-subscription', (req, res) => {
+app.post('/api/user/push-subscription', async (req, res) => {
   const { userId, subscription } = req.body;
   if (!subscription || !subscription.endpoint) {
     return res.status(400).json({ error: 'Inscrição push inválida.' });
   }
 
   const effectiveUserId = userId || 'anonymous';
-  const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
-  if (!subscriptions[effectiveUserId]) {
-    subscriptions[effectiveUserId] = [];
-  }
-
-  // Remove o mesmo endpoint de outros grupos para evitar duplicidade
-  for (const k in subscriptions) {
-    if (k !== effectiveUserId) {
-      subscriptions[k] = subscriptions[k].filter(s => s.endpoint !== subscription.endpoint);
-    }
-  }
-
-  const exists = subscriptions[effectiveUserId].some(s => s.endpoint === subscription.endpoint);
-  if (!exists) {
-    subscriptions[effectiveUserId].push(subscription);
-    writeJson(SUBSCRIPTIONS_FILE, subscriptions);
-    console.log(`[WebPush] ✅ Dispositivo registrado para ${effectiveUserId}. Total no grupo: ${subscriptions[effectiveUserId].length}`);
-  }
+  await db.saveSubscription(effectiveUserId, subscription);
+  console.log(`[WebPush] ✅ Dispositivo registrado para ${effectiveUserId}.`);
 
   res.json({ success: true });
 });
@@ -430,21 +396,19 @@ app.post('/api/admin/broadcast-push', requireAdmin, async (req, res) => {
 });
 
 // Rota de status para ver quantos celulares/computadores estão inscritos
-app.get('/api/admin/push-stats', requireAdmin, (req, res) => {
-  const subscriptions = readJson(SUBSCRIPTIONS_FILE, {});
+app.get('/api/admin/push-stats', requireAdmin, async (req, res) => {
+  const subscriptions = await db.getAllSubscriptions();
   const userCount = Object.keys(subscriptions).length;
   let totalDevices = 0;
   for (const uid in subscriptions) {
     totalDevices += (subscriptions[uid] || []).length;
   }
-  res.json({ userCount, totalDevices, subscriptions });
+  res.json({ userCount, totalDevices, isUsingPostgres: db.isUsingPostgres() });
 });
 
 // Exclui mensagem
-app.delete('/api/admin/message/:id', requireAdmin, (req, res) => {
-  let messages = readJson(MESSAGES_FILE, []);
-  messages = messages.filter(m => m.id !== req.params.id);
-  writeJson(MESSAGES_FILE, messages);
+app.delete('/api/admin/message/:id', requireAdmin, async (req, res) => {
+  await db.deleteMessage(req.params.id);
   res.json({ success: true });
 });
 

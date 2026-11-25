@@ -246,12 +246,40 @@
   text-decoration: underline;
 }
 
-/* Ajustes no Painel Admin para o botão de microfone junto ao campo de resposta */
+/* Ajustes no Painel Admin para o composer amplo com textarea, foto e áudio */
 .admin-reply-row {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
+}
+
+.admin-reply-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.admin-reply-actions,
+.composer-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.composer-media-btns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ticket-bubble .bubble-text,
+.desk-bubble .desk-bubble-text {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .btn-admin-mic {
@@ -357,21 +385,28 @@
 
 .drawer-composer-form {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   width: 100%;
 }
 
 .ticket-reply-input {
-  flex: 1;
+  width: 100%;
   min-width: 0;
-  padding: 9px 14px;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 22px;
+  min-height: 54px;
+  max-height: 160px;
+  padding: 10px 14px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 14px;
   font-size: 16px; /* Previne zoom automático no iPhone Safari */
+  font-family: inherit;
+  line-height: 1.45;
   outline: none;
   background: #f8fafc;
-  transition: all 0.2s ease;
+  resize: none;
+  overflow-y: auto;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .ticket-reply-input:focus {

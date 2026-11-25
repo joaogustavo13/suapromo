@@ -9,7 +9,20 @@ let adminToken = localStorage.getItem('suapromo_admin_token');
 document.addEventListener('DOMContentLoaded', () => {
   verifyAdminAuth();
   setupFilterInput();
+  setupAdminTextarea();
 });
+
+function autoResizeAdminTextarea(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(Math.max(el.scrollHeight, 56), 180) + 'px';
+}
+
+function setupAdminTextarea() {
+  const ta = document.getElementById('admin-reply-input');
+  if (!ta) return;
+  ta.addEventListener('input', () => autoResizeAdminTextarea(ta));
+}
 
 // Verifica se a sessão do administrador é válida
 async function verifyAdminAuth() {
@@ -515,7 +528,7 @@ function renderActiveThread(msg) {
         <div class="desk-bubble-sender">Cliente (${escapeHtml(msg.username)})</div>
         ${prodTag}
         ${entry.image ? renderChatImage(entry.image) : ''}
-        ${hasText ? `<div>${escapeHtml(entry.text)}</div>` : ''}
+        ${hasText ? `<div class="desk-bubble-text">${escapeHtml(entry.text)}</div>` : ''}
         ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
         <span class="desk-bubble-time">${time}</span>
       `;
@@ -525,7 +538,7 @@ function renderActiveThread(msg) {
       div.innerHTML = `
         <div class="desk-bubble-sender">Você (Atendimento)</div>
         ${entry.image ? renderChatImage(entry.image) : ''}
-        ${hasText ? `<div>${escapeHtml(entry.text)}</div>` : ''}
+        ${hasText ? `<div class="desk-bubble-text">${escapeHtml(entry.text)}</div>` : ''}
         ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
         <span class="desk-bubble-time">${time}</span>
       `;
@@ -565,7 +578,10 @@ async function sendReplyToUser(e) {
     });
 
     if (res.ok) {
-      if (input) input.value = '';
+      if (input) {
+        input.value = '';
+        input.style.height = '';
+      }
       discardAdminRecording();
       discardAdminPhoto();
       showToast('✅ Resposta enviada! O cliente foi notificado.');
@@ -586,6 +602,7 @@ function insertReplyText(text) {
   const input = document.getElementById('admin-reply-input');
   if (input) {
     input.value = text;
+    autoResizeAdminTextarea(input);
     input.focus();
   }
 }

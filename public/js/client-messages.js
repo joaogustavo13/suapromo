@@ -89,6 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHeaderUserArea();
   initUserSocket();
   registerServiceWorker();
+  setupDrawerTextarea();
 
   // Se já tiver permissão concedida, sincroniza na hora (mesmo deslogado)
   if ('Notification' in window && Notification.permission === 'granted') {
@@ -405,6 +406,18 @@ async function loadUserMessages() {
 let drawerVoiceRecorder = null;
 let drawerRecordedAudio = null;
 
+function autoResizeDrawerTextarea(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(Math.max(el.scrollHeight, 54), 160) + 'px';
+}
+
+function setupDrawerTextarea() {
+  const ta = document.getElementById('drawer-reply-input');
+  if (!ta) return;
+  ta.addEventListener('input', () => autoResizeDrawerTextarea(ta));
+}
+
 function scrollDrawerToBottom() {
   const container = document.getElementById('drawer-tickets-list');
   if (container) {
@@ -605,7 +618,10 @@ async function submitUnifiedCustomerReply(e) {
     }
 
     if (res.ok) {
-      if (input) input.value = '';
+      if (input) {
+        input.value = '';
+        input.style.height = '';
+      }
       discardDrawerAudioRecording();
       discardDrawerPhoto();
       showToast('✅ Mensagem enviada!');
@@ -619,7 +635,7 @@ async function submitUnifiedCustomerReply(e) {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = 'Enviar';
+      btn.textContent = 'Enviar ➤';
     }
   }
 }

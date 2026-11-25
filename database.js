@@ -75,9 +75,11 @@ async function initDatabase() {
         replied_at TIMESTAMPTZ
       );
 
-      -- Garante novas colunas de áudio e histórico de conversa caso a tabela já exista
+      -- Garante novas colunas de áudio, foto e histórico de conversa caso a tabela já exista
       ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS question_audio TEXT;
       ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS reply_audio TEXT;
+      ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS question_image TEXT;
+      ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS reply_image TEXT;
       ALTER TABLE app_messages ADD COLUMN IF NOT EXISTS history JSONB DEFAULT '[]';
 
       CREATE TABLE IF NOT EXISTS app_subscriptions (
@@ -336,8 +338,10 @@ function formatMessageRow(r) {
     productLink: r.product_link,
     question: r.question,
     questionAudio: r.question_audio || null,
+    questionImage: r.question_image || null,
     reply: r.reply,
     replyAudio: r.reply_audio || null,
+    replyImage: r.reply_image || null,
     status: r.status,
     history: hist,
     createdAt: r.created_at,
@@ -405,6 +409,7 @@ async function addMessage(msg) {
     sender: 'client',
     text: msg.question || '',
     audio: msg.questionAudio || null,
+    image: msg.questionImage || null,
     productId: msg.productId || null,
     productTitle: msg.productTitle || null,
     productImage: msg.productImage || null,
@@ -433,10 +438,11 @@ async function addMessage(msg) {
                product_link = COALESCE($6, product_link),
                question = $7,
                question_audio = $8,
+               question_image = $9,
                status = 'pending',
-               history = $9,
-               created_at = $10
-           WHERE id = $11 RETURNING *`,
+               history = $10,
+               created_at = $11
+           WHERE id = $12 RETURNING *`,
           [
             msg.username || existing.username,
             msg.phone || existing.phone,
@@ -446,6 +452,7 @@ async function addMessage(msg) {
             msg.productLink || existing.productLink,
             msg.question || '',
             msg.questionAudio || null,
+            msg.questionImage || null,
             JSON.stringify(updatedHistory),
             msg.createdAt,
             existing.id
@@ -457,8 +464,8 @@ async function addMessage(msg) {
       // Primeira conversa deste cliente
       msg.history = [newEntry];
       await pool.query(
-        `INSERT INTO app_messages (id, user_id, username, phone, product_id, product_title, product_image, product_link, question, question_audio, reply, reply_audio, status, history, created_at, replied_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+        `INSERT INTO app_messages (id, user_id, username, phone, product_id, product_title, product_image, product_link, question, question_audio, question_image, reply, reply_audio, reply_image, status, history, created_at, replied_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
         [
           msg.id,
           msg.userId,
@@ -470,8 +477,10 @@ async function addMessage(msg) {
           msg.productLink,
           msg.question || '',
           msg.questionAudio || null,
+          msg.questionImage || null,
           msg.reply || null,
           msg.replyAudio || null,
+          msg.replyImage || null,
           msg.status || 'pending',
           JSON.stringify(msg.history),
           msg.createdAt,
@@ -495,6 +504,7 @@ async function addMessage(msg) {
         sender: 'client',
         text: existing.question || '',
         audio: existing.questionAudio || null,
+        image: existing.questionImage || null,
         productId: existing.productId || null,
         productTitle: existing.productTitle || null,
         productImage: existing.productImage || null,
@@ -511,6 +521,7 @@ async function addMessage(msg) {
     existing.productLink = msg.productLink || existing.productLink;
     existing.question = msg.question || '';
     existing.questionAudio = msg.questionAudio || null;
+    existing.questionImage = msg.questionImage || null;
     existing.status = 'pending';
     existing.history = hist;
     existing.createdAt = msg.createdAt;
@@ -526,7 +537,7 @@ async function addMessage(msg) {
   return msg;
 }
 
-async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {
+async function updateMessageReply(id, reply, repliedAt, replyAudio = null, replyImage = null) {
   let existing = null;
   if (usePostgres) {
     try {
@@ -544,6 +555,7 @@ async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {
     sender: 'admin',
     text: reply || '',
     audio: replyAudio || null,
+    image: replyImage || null,
     createdAt: repliedAt
   });
 
@@ -552,9 +564,9 @@ async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {
     try {
       const res = await pool.query(
         `UPDATE app_messages 
-         SET reply = $1, reply_audio = $2, status = 'answered', replied_at = $3, history = $4 
-         WHERE id = $5 RETURNING *`,
-        [reply, replyAudio, repliedAt, JSON.stringify(history), id]
+         SET reply = $1, reply_audio = $2, reply_image = $3, status = 'answered', replied_at = $4, history = $5 
+         WHERE id = $6 RETURNING *`,
+        [reply, replyAudio, replyImage, repliedAt, JSON.stringify(history), id]
       );
       if (res.rows.length > 0) {
         updatedMsg = formatMessageRow(res.rows[0]);
@@ -569,6 +581,7 @@ async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {
   if (index !== -1) {
     messages[index].reply = reply;
     messages[index].replyAudio = replyAudio || null;
+    messages[index].replyImage = replyImage || null;
     messages[index].status = 'answered';
     messages[index].repliedAt = repliedAt;
     messages[index].history = history;
@@ -579,7 +592,7 @@ async function updateMessageReply(id, reply, repliedAt, replyAudio = null) {
 }
 
 // Cliente envia réplica/resposta na conversa existente (chat contínuo)
-async function addCustomerReply(id, text, audio = null, createdAt) {
+async function addCustomerReply(id, text, audio = null, createdAt, image = null) {
   let existing = null;
   if (usePostgres) {
     try {
@@ -599,6 +612,7 @@ async function addCustomerReply(id, text, audio = null, createdAt) {
     sender: 'client',
     text: text || '',
     audio: audio || null,
+    image: image || null,
     createdAt: createdAt
   });
 
@@ -607,9 +621,9 @@ async function addCustomerReply(id, text, audio = null, createdAt) {
     try {
       const res = await pool.query(
         `UPDATE app_messages 
-         SET question = $1, question_audio = $2, status = 'pending', history = $3 
-         WHERE id = $4 RETURNING *`,
-        [text || existing.question, audio || existing.questionAudio, JSON.stringify(history), id]
+         SET question = $1, question_audio = $2, question_image = $3, status = 'pending', history = $4 
+         WHERE id = $5 RETURNING *`,
+        [text || existing.question, audio || existing.questionAudio, image || existing.questionImage, JSON.stringify(history), id]
       );
       if (res.rows.length > 0) {
         updatedMsg = formatMessageRow(res.rows[0]);
@@ -624,6 +638,7 @@ async function addCustomerReply(id, text, audio = null, createdAt) {
   if (index !== -1) {
     messages[index].question = text || messages[index].question;
     messages[index].questionAudio = audio || messages[index].questionAudio;
+    messages[index].questionImage = image || messages[index].questionImage;
     messages[index].status = 'pending';
     messages[index].history = history;
     writeJson(MESSAGES_FILE, messages);

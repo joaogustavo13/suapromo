@@ -248,6 +248,105 @@ function sendAudioToTelegram(token, chatId, msg) {
   });
 }
 
+function sendPhotoToTelegram(token, chatId, msg) {
+  return new Promise((resolve) => {
+    try {
+      const rawImg = msg.questionImage || '';
+      const base64Marker = ';base64,';
+      const idx = rawImg.indexOf(base64Marker);
+      if (idx === -1) return resolve(false);
+
+      const mimePart = rawImg.slice(5, idx).toLowerCase();
+      const base64Payload = rawImg.slice(idx + base64Marker.length);
+      if (!base64Payload) return resolve(false);
+
+      let ext = 'jpg';
+      let contentType = 'image/jpeg';
+      if (mimePart.includes('png')) {
+        ext = 'png';
+        contentType = 'image/png';
+      } else if (mimePart.includes('webp')) {
+        ext = 'webp';
+        contentType = 'image/webp';
+      }
+
+      const imgBuffer = Buffer.from(base64Payload, 'base64');
+
+      const phoneInfo = msg.phone ? `\n📱 WhatsApp: ${msg.phone}` : '';
+      const prodInfo = msg.productTitle ? `\n🏷️ Oferta: ${msg.productTitle}` : '';
+      const hasCustomText = msg.question && !msg.question.startsWith('🎤 [') && !msg.question.startsWith('📷 [');
+      const textLine = hasCustomText ? `\n💬 Texto: "${msg.question}"` : '';
+
+      const caption = `📷 FOTO DO CLIENTE NO SUA PROMO!\n\n` +
+        `👤 Cliente: ${msg.username}${phoneInfo}${prodInfo}${textLine}\n\n` +
+        `👉 Toque abaixo para responder pelo painel:`;
+
+      const inlineKeyboard = {
+        inline_keyboard: [
+          [{ text: '💬 Abrir Painel e Responder', url: 'https://suapromo.onrender.com/admin.html' }]
+        ]
+      };
+
+      const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+      const parts = [];
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${String(chatId).trim()}\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="reply_markup"\r\n\r\n${JSON.stringify(inlineKeyboard)}\r\n`));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="photo_${msg.id || 'msg'}.${ext}"\r\nContent-Type: ${contentType}\r\n\r\n`));
+      parts.push(imgBuffer);
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+      const fullLen = parts.reduce((a, b) => a + b.length, 0);
+
+      const req = https.request({
+        hostname: 'api.telegram.org',
+        port: 443,
+        path: `/bot${String(token).trim()}/sendPhoto`,
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': fullLen
+        },
+        timeout: 25000
+      }, res => {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            if (data.ok) {
+              console.log('🤖 [Telegram Bot] ✅ Foto do cliente enviada ao Telegram do dono!');
+              resolve(true);
+            } else {
+              console.warn('🤖 [Telegram Bot] ❌ Erro envio foto Telegram:', data.description);
+              resolve(false);
+            }
+          } catch (e) {
+            resolve(false);
+          }
+        });
+      });
+
+      req.on('error', err => {
+        console.error('🤖 [Telegram Bot] Erro de rede ao enviar foto:', err.message);
+        resolve(false);
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        console.error('🤖 [Telegram Bot] Timeout ao enviar foto para Telegram');
+        resolve(false);
+      });
+
+      parts.forEach(p => req.write(p));
+      req.end();
+    } catch (err) {
+      console.error('🤖 [Telegram Bot] Exceção ao enviar foto:', err.message);
+      resolve(false);
+    }
+  });
+}
+
 async function notifyOwnerViaTelegram(msg) {
   const settings = db.getSettings();
   const token = process.env.TELEGRAM_BOT_TOKEN || settings.telegramBotToken;
@@ -258,12 +357,21 @@ async function notifyOwnerViaTelegram(msg) {
     return false;
   }
 
+  let mediaSent = false;
+
+  // Se o cliente enviou foto, envia para o Telegram do dono
+  if (msg.questionImage && msg.questionImage.startsWith('data:image')) {
+    const photoSent = await sendPhotoToTelegram(token, chatId, msg);
+    if (photoSent) mediaSent = true;
+  }
+
   // Se o cliente enviou áudio, despacha o arquivo de áudio diretamente para o Telegram do dono!
   if (msg.questionAudio && msg.questionAudio.startsWith('data:audio')) {
     const audioSent = await sendAudioToTelegram(token, chatId, msg);
-    if (audioSent) return true;
-    console.warn('🤖 [Telegram Bot] Fallback para alerta em texto após falha no sendAudio.');
+    if (audioSent) mediaSent = true;
   }
+
+  if (mediaSent) return true;
 
   const phoneInfo = msg.phone ? `\n📱 WhatsApp do Cliente: ${msg.phone}` : '';
   const prodInfo = msg.productTitle ? `\n🏷️ Oferta: ${msg.productTitle}` : '';
@@ -525,15 +633,16 @@ app.get('/api/user/messages', async (req, res) => {
   res.json(userMessages);
 });
 
-// Usuário envia uma dúvida sobre um produto (texto ou áudio)
+// Usuário envia uma dúvida sobre um produto (texto, áudio ou foto)
 app.post('/api/user/messages', async (req, res) => {
-  const { userId, username, productId, productTitle, productImage, productLink, phone, question, questionAudio } = req.body;
+  const { userId, username, productId, productTitle, productImage, productLink, phone, question, questionAudio, questionImage } = req.body;
 
-  if (!userId || ((!question || !question.trim()) && !questionAudio)) {
-    return res.status(400).json({ error: 'Envie sua dúvida em texto ou por áudio.' });
+  if (!userId || ((!question || !question.trim()) && !questionAudio && !questionImage)) {
+    return res.status(400).json({ error: 'Envie sua dúvida em texto, áudio ou foto.' });
   }
 
   const now = new Date().toISOString();
+  const fallbackLabel = questionImage && !questionAudio ? '📷 [Foto Enviada]' : '🎤 [Dúvida em Áudio]';
 
   const newMsg = {
     id: 'msg_' + crypto.randomUUID().slice(0, 8),
@@ -544,10 +653,12 @@ app.post('/api/user/messages', async (req, res) => {
     productTitle: productTitle || null,
     productImage: productImage || null,
     productLink: productLink || null,
-    question: (question && question.trim()) || '🎤 [Dúvida em Áudio]',
+    question: (question && question.trim()) || fallbackLabel,
     questionAudio: questionAudio || null,
+    questionImage: questionImage || null,
     reply: null,
     replyAudio: null,
+    replyImage: null,
     status: 'pending', // 'pending' | 'answered'
     createdAt: now,
     repliedAt: null
@@ -580,15 +691,16 @@ app.post('/api/user/messages', async (req, res) => {
 // Cliente envia réplica/continuação na conversa existente (chat contínuo)
 app.post('/api/user/reply/:id', async (req, res) => {
   const { id } = req.params;
-  const { userId, reply, replyAudio } = req.body;
+  const { userId, reply, replyAudio, replyImage } = req.body;
 
-  if (!userId || ((!reply || !reply.trim()) && !replyAudio)) {
-    return res.status(400).json({ error: 'Mensagem ou áudio é obrigatório.' });
+  if (!userId || ((!reply || !reply.trim()) && !replyAudio && !replyImage)) {
+    return res.status(400).json({ error: 'Mensagem, áudio ou foto é obrigatório.' });
   }
 
   const now = new Date().toISOString();
-  const textContent = (reply && reply.trim()) || '🎤 [Dúvida/Áudio do Cliente]';
-  const updatedMsg = await db.addCustomerReply(id, textContent, replyAudio || null, now);
+  const fallbackLabel = replyImage && !replyAudio ? '📷 [Foto Enviada]' : '🎤 [Dúvida/Áudio do Cliente]';
+  const textContent = (reply && reply.trim()) || fallbackLabel;
+  const updatedMsg = await db.addCustomerReply(id, textContent, replyAudio || null, now, replyImage || null);
 
   if (!updatedMsg) {
     return res.status(404).json({ error: 'Conversa não encontrada.' });
@@ -606,7 +718,8 @@ app.post('/api/user/reply/:id', async (req, res) => {
       phone: updatedMsg.phone,
       productTitle: updatedMsg.productTitle,
       question: textContent,
-      questionAudio: replyAudio || null
+      questionAudio: replyAudio || null,
+      questionImage: replyImage || null
     });
   } catch (tgErr) {
     console.error('Erro ao notificar Telegram da réplica:', tgErr.message);
@@ -719,18 +832,19 @@ app.get('/api/admin/messages', requireAdmin, async (req, res) => {
   res.json(messages);
 });
 
-// Dono responde à dúvida (texto ou áudio)
+// Dono responde à dúvida (texto, áudio ou foto)
 app.post('/api/admin/reply/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { reply, replyAudio } = req.body;
+  const { reply, replyAudio, replyImage } = req.body;
 
-  if ((!reply || !reply.trim()) && !replyAudio) {
-    return res.status(400).json({ error: 'Envie uma resposta em texto ou por áudio.' });
+  if ((!reply || !reply.trim()) && !replyAudio && !replyImage) {
+    return res.status(400).json({ error: 'Envie uma resposta em texto, áudio ou foto.' });
   }
 
   const now = new Date().toISOString();
-  const effectiveReply = (reply && reply.trim()) || '🎤 [Resposta em Áudio]';
-  const updatedMsg = await db.updateMessageReply(id, effectiveReply, now, replyAudio || null);
+  const fallbackLabel = replyImage && !replyAudio ? '📷 [Foto Enviada]' : '🎤 [Resposta em Áudio]';
+  const effectiveReply = (reply && reply.trim()) || fallbackLabel;
+  const updatedMsg = await db.updateMessageReply(id, effectiveReply, now, replyAudio || null, replyImage || null);
 
   if (!updatedMsg) {
     return res.status(404).json({ error: 'Mensagem não encontrada.' });

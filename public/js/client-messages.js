@@ -236,6 +236,61 @@ function logoutUser() {
   showToast('Você saiu da sua conta.');
 }
 
+let clientSelectedImage = null;
+
+function initClientPhotoPicker() {
+  clientSelectedImage = null;
+  renderAskPhotoUI();
+}
+
+function renderAskPhotoUI() {
+  const container = document.getElementById('client-photo-record-zone');
+  if (!container) return;
+
+  if (!clientSelectedImage) {
+    container.innerHTML = `
+      <div class="audio-record-btn-row">
+        <button type="button" class="btn-record-mic" style="color: #3b82f6; border-color: #3b82f6; background: rgba(59, 130, 246, 0.08);" onclick="triggerAskPhoto()">
+          📷 Anexar Foto
+        </button>
+      </div>
+    `;
+  } else {
+    container.innerHTML = `
+      <div class="photo-preview-box">
+        <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+          <img src="${clientSelectedImage}" class="photo-preview-thumb" alt="Foto">
+          <span style="font-size: 0.82rem; font-weight: 700; color: #2563eb;">✅ Foto anexada!</span>
+        </div>
+        <button type="button" class="btn-discard-audio" onclick="discardAskPhoto()" title="Remover foto">🗑️ Remover</button>
+      </div>
+    `;
+  }
+}
+
+function triggerAskPhoto() {
+  const input = document.getElementById('ask-photo-input');
+  if (input) input.click();
+}
+
+async function handleAskPhotoSelect(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    clientSelectedImage = await compressImageFileToBase64(file);
+    renderAskPhotoUI();
+  } catch (err) {
+    showToast('Não foi possível carregar a foto.');
+  } finally {
+    e.target.value = '';
+  }
+}
+
+function discardAskPhoto() {
+  clientSelectedImage = null;
+  renderAskPhotoUI();
+}
+
 // Modal de Envio de Dúvida
 function openAskModal(prodId, prodTitle, prodPrice, prodImg, prodLink) {
   // Se não estiver logado, pede nome e senha primeiro
@@ -257,6 +312,7 @@ function openAskModal(prodId, prodTitle, prodPrice, prodImg, prodLink) {
 
   document.getElementById('ask-modal-overlay').style.display = 'flex';
   initClientAudioRecorder();
+  initClientPhotoPicker();
   setTimeout(() => document.getElementById('client-question').focus(), 100);
 }
 
@@ -264,6 +320,7 @@ function closeAskModal() {
   document.getElementById('ask-modal-overlay').style.display = 'none';
   document.getElementById('client-question').value = '';
   discardClientAudioRecording();
+  discardAskPhoto();
 }
 
 async function submitProductQuestion(e) {
@@ -280,8 +337,8 @@ async function submitProductQuestion(e) {
   const prodImg = document.getElementById('ask-prod-image').value;
   const prodLink = document.getElementById('ask-prod-link').value;
 
-  if (!question && !clientRecordedAudio) {
-    showToast('Digite sua dúvida ou grave um áudio para enviar.');
+  if (!question && !clientRecordedAudio && !clientSelectedImage) {
+    showToast('Digite sua dúvida, grave um áudio ou anexe uma foto.');
     return;
   }
 
@@ -290,6 +347,7 @@ async function submitProductQuestion(e) {
   btn.textContent = 'Enviando...';
 
   try {
+    const fallbackLabel = clientSelectedImage && !clientRecordedAudio ? '📷 [Foto Enviada]' : '🎤 [Dúvida em Áudio]';
     const res = await fetch('/api/user/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -301,8 +359,9 @@ async function submitProductQuestion(e) {
         productImage: prodImg,
         productLink: prodLink,
         phone,
-        question: question || '🎤 [Dúvida em Áudio]',
-        questionAudio: clientRecordedAudio || null
+        question: question || fallbackLabel,
+        questionAudio: clientRecordedAudio || null,
+        questionImage: clientSelectedImage || null
       })
     });
 
@@ -447,6 +506,50 @@ function discardDrawerAudioRecording() {
   renderDrawerRecorderUI('idle', 0);
 }
 
+let drawerSelectedImage = null;
+
+function triggerDrawerPhoto() {
+  const input = document.getElementById('drawer-photo-input');
+  if (input) input.click();
+}
+
+async function handleDrawerPhotoSelect(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    drawerSelectedImage = await compressImageFileToBase64(file);
+    renderDrawerPhotoUI();
+    scrollDrawerToBottom();
+  } catch (err) {
+    showToast('Não foi possível carregar a foto.');
+  } finally {
+    e.target.value = '';
+  }
+}
+
+function discardDrawerPhoto() {
+  drawerSelectedImage = null;
+  renderDrawerPhotoUI();
+}
+
+function renderDrawerPhotoUI() {
+  const container = document.getElementById('drawer-photo-zone');
+  if (!container) return;
+  if (!drawerSelectedImage) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = `
+    <div class="photo-preview-box">
+      <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+        <img src="${drawerSelectedImage}" class="photo-preview-thumb" alt="Foto">
+        <span style="font-size: 0.8rem; font-weight: 700; color: #2563eb;">📷 Foto pronta para envio</span>
+      </div>
+      <button type="button" class="btn-discard-audio" onclick="discardDrawerPhoto()" title="Descartar foto">🗑️</button>
+    </div>
+  `;
+}
+
 async function submitUnifiedCustomerReply(e) {
   if (e) e.preventDefault();
   if (!currentUser) {
@@ -457,9 +560,10 @@ async function submitUnifiedCustomerReply(e) {
   const input = document.getElementById('drawer-reply-input');
   const text = input ? input.value.trim() : '';
   const audio = drawerRecordedAudio || null;
+  const image = drawerSelectedImage || null;
 
-  if (!text && !audio) {
-    showToast('Digite uma mensagem ou grave um áudio.');
+  if (!text && !audio && !image) {
+    showToast('Digite uma mensagem, grave um áudio ou envie uma foto.');
     return;
   }
 
@@ -471,6 +575,7 @@ async function submitUnifiedCustomerReply(e) {
 
   try {
     const primaryChat = (userMessages && userMessages.length > 0) ? userMessages[0] : null;
+    const fallbackLabel = image && !audio ? '📷 [Foto Enviada]' : '🎤 [Dúvida em Áudio]';
     let res;
 
     if (primaryChat) {
@@ -480,7 +585,8 @@ async function submitUnifiedCustomerReply(e) {
         body: JSON.stringify({
           userId: currentUser.id,
           reply: text,
-          replyAudio: audio
+          replyAudio: audio,
+          replyImage: image
         })
       });
     } else {
@@ -491,8 +597,9 @@ async function submitUnifiedCustomerReply(e) {
         body: JSON.stringify({
           userId: currentUser.id,
           username: currentUser.username,
-          question: text || '🎤 [Dúvida em Áudio]',
-          questionAudio: audio
+          question: text || fallbackLabel,
+          questionAudio: audio,
+          questionImage: image
         })
       });
     }
@@ -500,6 +607,7 @@ async function submitUnifiedCustomerReply(e) {
     if (res.ok) {
       if (input) input.value = '';
       discardDrawerAudioRecording();
+      discardDrawerPhoto();
       showToast('✅ Mensagem enviada!');
       await loadUserMessages();
       scrollDrawerToBottom();
@@ -537,7 +645,7 @@ function renderUserMessagesList() {
       ${pushBanner}
       <div class="empty-drawer">
         <p>Sua conversa com a equipe <strong>Sua Promo</strong> está aberta!</p>
-        <small>Escreva ou grave um áudio abaixo, ou clique em "Tirar Dúvida" em qualquer oferta.</small>
+        <small>Escreva, grave um áudio ou envie uma foto abaixo, ou clique em "Tirar Dúvida" em qualquer oferta.</small>
       </div>
     `;
     return;
@@ -552,17 +660,19 @@ function renderUserMessagesList() {
         sender: 'client',
         text: m.question,
         audio: m.questionAudio,
+        image: m.questionImage,
         productId: m.productId,
         productTitle: m.productTitle,
         productImage: m.productImage,
         productLink: m.productLink,
         createdAt: m.createdAt
       },
-      ...(m.reply || m.replyAudio ? [{
+      ...(m.reply || m.replyAudio || m.replyImage ? [{
         id: 'msg_r_' + m.id,
         sender: 'admin',
         text: m.reply,
         audio: m.replyAudio,
+        image: m.replyImage,
         createdAt: m.repliedAt
       }] : [])
     ];
@@ -585,21 +695,23 @@ function renderUserMessagesList() {
     ` : '';
 
     if (entry.sender === 'client') {
-      const hasText = entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]';
+      const hasText = entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]' && entry.text !== '📷 [Foto Enviada]';
       return `
         <div class="ticket-bubble bubble-client">
           ${productTagHtml}
           <div class="bubble-sender">Você</div>
+          ${entry.image ? renderChatImage(entry.image) : ''}
           ${hasText ? `<div class="bubble-text">${escapeHtml(entry.text)}</div>` : ''}
           ${entry.audio ? renderAudioPlayer(entry.audio, 'c_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
           <span class="bubble-time">${time}</span>
         </div>
       `;
     } else {
-      const hasText = entry.text && entry.text !== '🎤 [Resposta em Áudio]';
+      const hasText = entry.text && entry.text !== '🎤 [Resposta em Áudio]' && entry.text !== '📷 [Foto Enviada]';
       return `
         <div class="ticket-bubble bubble-admin">
           <div class="bubble-sender">Equipe Sua Promo</div>
+          ${entry.image ? renderChatImage(entry.image) : ''}
           ${hasText ? `<div class="bubble-text">${escapeHtml(entry.text)}</div>` : ''}
           ${entry.audio ? renderAudioPlayer(entry.audio, 'a_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
           <span class="bubble-time">${time}</span>

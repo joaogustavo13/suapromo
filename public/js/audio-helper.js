@@ -283,3 +283,76 @@ class AudioVoiceRecorder {
     this.onCancel();
   }
 }
+
+// --- UTILITÁRIOS DE ENVIO E VISUALIZAÇÃO DE FOTOS ---
+function compressImageFileToBase64(file, maxDim = 1200, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith('image/')) {
+      return reject(new Error('Selecione um arquivo de imagem válido.'));
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = () => reject(new Error('Erro ao carregar imagem.'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Erro ao ler arquivo.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderChatImage(imageSrc) {
+  if (!imageSrc) return '';
+  return `
+    <div class="chat-photo-wrap" onclick="openImageLightbox(this.querySelector('img').src)">
+      <img src="${imageSrc}" class="chat-photo-thumb" alt="Foto enviada" loading="lazy">
+    </div>
+  `;
+}
+
+function openImageLightbox(src) {
+  if (!src) return;
+  let overlay = document.getElementById('chat-photo-lightbox');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'chat-photo-lightbox';
+    overlay.className = 'chat-photo-lightbox';
+    overlay.onclick = closeImageLightbox;
+    overlay.innerHTML = `
+      <button type="button" class="lightbox-close-btn" onclick="closeImageLightbox()">&times;</button>
+      <img id="chat-lightbox-img" src="" alt="Visualizar foto">
+    `;
+    document.body.appendChild(overlay);
+  }
+  document.getElementById('chat-lightbox-img').src = src;
+  overlay.style.display = 'flex';
+}
+
+function closeImageLightbox() {
+  const overlay = document.getElementById('chat-photo-lightbox');
+  if (overlay) overlay.style.display = 'none';
+}

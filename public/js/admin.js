@@ -299,6 +299,7 @@ function selectAdminMessage(msgId) {
   if (!msg) return;
 
   discardAdminRecording();
+  discardAdminPhoto();
 
   // Mobile: abre a visão da conversa ocupando 100% da tela
   const dashboard = document.querySelector('.chat-dashboard');
@@ -441,14 +442,58 @@ function discardAdminRecording() {
   if (adminVoiceRecorder) adminVoiceRecorder.cancel();
 }
 
+// --- ENVIO DE FOTOS DO ADMIN ---
+let adminSelectedImage = null;
+
+function triggerAdminPhoto() {
+  const input = document.getElementById('admin-photo-input');
+  if (input) input.click();
+}
+
+async function handleAdminPhotoSelect(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    adminSelectedImage = await compressImageFileToBase64(file);
+    renderAdminPhotoUI();
+  } catch (err) {
+    showToast('Não foi possível carregar a foto.');
+  } finally {
+    e.target.value = '';
+  }
+}
+
+function discardAdminPhoto() {
+  adminSelectedImage = null;
+  renderAdminPhotoUI();
+}
+
+function renderAdminPhotoUI() {
+  const container = document.getElementById('admin-photo-record-zone');
+  if (!container) return;
+  if (!adminSelectedImage) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = `
+    <div class="photo-preview-box">
+      <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+        <img src="${adminSelectedImage}" class="photo-preview-thumb" alt="Foto">
+        <span style="font-size: 0.82rem; font-weight: 700; color: #2563eb;">📷 Foto pronta para envio!</span>
+      </div>
+      <button type="button" class="btn-discard-audio" onclick="discardAdminPhoto()" title="Descartar foto">🗑️ Descartar</button>
+    </div>
+  `;
+}
+
 function renderActiveThread(msg) {
   const container = document.getElementById('active-thread-scroll');
   container.innerHTML = '';
 
   // Histórico completo de mensagens (chat contínuo)
   const hist = Array.isArray(msg.history) && msg.history.length > 0 ? msg.history : [
-    { sender: 'client', text: msg.question, audio: msg.questionAudio, createdAt: msg.createdAt },
-    ...(msg.reply || msg.replyAudio ? [{ sender: 'admin', text: msg.reply, audio: msg.replyAudio, createdAt: msg.repliedAt }] : [])
+    { sender: 'client', text: msg.question, audio: msg.questionAudio, image: msg.questionImage, createdAt: msg.createdAt },
+    ...(msg.reply || msg.replyAudio || msg.replyImage ? [{ sender: 'admin', text: msg.reply, audio: msg.replyAudio, image: msg.replyImage, createdAt: msg.repliedAt }] : [])
   ];
 
   hist.forEach(entry => {
@@ -464,19 +509,23 @@ function renderActiveThread(msg) {
           </div>
         </a>
       ` : '';
+      const hasText = entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]' && entry.text !== '📷 [Foto Enviada]';
       div.className = 'desk-bubble desk-bubble-visitor';
       div.innerHTML = `
         <div class="desk-bubble-sender">Cliente (${escapeHtml(msg.username)})</div>
         ${prodTag}
-        ${entry.text && entry.text !== '🎤 [Dúvida em Áudio]' && entry.text !== '🎤 [Áudio do Cliente]' && entry.text !== '🎤 [Dúvida/Áudio do Cliente]' ? `<div>${escapeHtml(entry.text)}</div>` : ''}
+        ${entry.image ? renderChatImage(entry.image) : ''}
+        ${hasText ? `<div>${escapeHtml(entry.text)}</div>` : ''}
         ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
         <span class="desk-bubble-time">${time}</span>
       `;
     } else {
+      const hasText = entry.text && entry.text !== '🎤 [Resposta em Áudio]' && entry.text !== '📷 [Foto Enviada]';
       div.className = 'desk-bubble desk-bubble-admin';
       div.innerHTML = `
         <div class="desk-bubble-sender">Você (Atendimento)</div>
-        ${entry.text && entry.text !== '🎤 [Resposta em Áudio]' ? `<div>${escapeHtml(entry.text)}</div>` : ''}
+        ${entry.image ? renderChatImage(entry.image) : ''}
+        ${hasText ? `<div>${escapeHtml(entry.text)}</div>` : ''}
         ${entry.audio ? renderAudioPlayer(entry.audio, 'admin_voice_' + (entry.id || Math.random().toString(36).substring(2)), 'Áudio') : ''}
         <span class="desk-bubble-time">${time}</span>
       `;
@@ -487,14 +536,14 @@ function renderActiveThread(msg) {
   container.scrollTop = container.scrollHeight;
 }
 
-// Envia resposta (texto ou áudio)
+// Envia resposta (texto, áudio ou foto)
 async function sendReplyToUser(e) {
   if (e) e.preventDefault();
   const input = document.getElementById('admin-reply-input');
   const text = input ? input.value.trim() : '';
 
-  if ((!text && !adminRecordedAudio) || !currentMsgId || !adminToken) {
-    showToast('Digite uma mensagem ou grave um áudio para responder.');
+  if ((!text && !adminRecordedAudio && !adminSelectedImage) || !currentMsgId || !adminToken) {
+    showToast('Digite uma mensagem, grave um áudio ou anexe uma foto.');
     return;
   }
 
@@ -510,13 +559,15 @@ async function sendReplyToUser(e) {
       },
       body: JSON.stringify({
         reply: text,
-        replyAudio: adminRecordedAudio || null
+        replyAudio: adminRecordedAudio || null,
+        replyImage: adminSelectedImage || null
       })
     });
 
     if (res.ok) {
       if (input) input.value = '';
       discardAdminRecording();
+      discardAdminPhoto();
       showToast('✅ Resposta enviada! O cliente foi notificado.');
       loadAdminMessages();
       const data = await res.json();
@@ -562,6 +613,7 @@ async function deleteCurrentMessage() {
 function closeMobileChat() {
   currentMsgId = null;
   discardAdminRecording();
+  discardAdminPhoto();
   const dashboard = document.querySelector('.chat-dashboard');
   if (dashboard) dashboard.classList.remove('mobile-chat-open');
   document.getElementById('active-message-container').style.display = 'none';
